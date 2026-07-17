@@ -24,11 +24,16 @@ host keeps one RN surface mounted at a time and passes the selected route as
 environment and Metro controls live behind the Developer tab's native Settings
 action.
 
-The demo backend is the app's own server run twice: a **dev** instance on
-`http://localhost:3000` and a **prod** instance on `http://localhost:3001`. The
-same exported bundle is served by both; the environment (chosen per instance)
-flips the gateway host stamped into the manifest and the served update id, which
-demonstrates the dual-environment gateway seam.
+The demo backend is the app's own server run as two instances: a **dev**
+instance on `http://localhost:3000` and a **prod** instance on
+`http://localhost:3001`. The same exported bundle is served by both; the
+environment (chosen per instance) flips the gateway host stamped into the
+manifest and the served update id, which demonstrates the dual-environment
+gateway seam. For Mode B (release artifact) testing the two instances run as
+**standalone Docker containers** (`docker compose up --build -d`) that bake the
+export -- never as host-run dev servers; the host-run `pnpm server:*` scripts
+exist only for standalone-web iteration. See
+[docs/development-workflow.md](./docs/development-workflow.md).
 
 ## Orientation
 
@@ -64,8 +69,9 @@ The end-to-end verification order. Details in
 
 ```
 1  pnpm install
+1b pnpm typecheck && pnpm test                     # the CI gate; must be green first
 2  pnpm --filter @ota-gateway/mobile export        # export all platforms + generate manifest
-3  pnpm server:dev & pnpm server:prod              # dev :3000, prod :3001
+3  docker compose up --build -d                    # gateway containers (Mode B serving) -- dev :3000, prod :3001
 4  browser: standalone web on :3000; curl manifests on :3000/:3001 -- distinct update ids
 4b standalone native spot-check: npx expo run:ios / run:android
 5  cd apps/mobile && node scripts/prebuild.mjs --android
@@ -78,7 +84,7 @@ The end-to-end verification order. Details in
 12 cd hosts/ios && xcodegen && xcodebuild (simulator) && simctl install/launch
 13 iOS Mode B: same OTA flow
 14 ./scripts/package-ios.sh --configuration Debug -> rebuild host -> iOS Mode A
-15 OTA proof: bump the bundle marker -> step 2 -> Check/Download/Restart -> new marker (both platforms)
+15 OTA proof: bump the bundle marker -> step 2 -> step 3 (rebuild containers) -> Check/Download/Restart -> new marker (both platforms)
 ```
 
 ## Status
@@ -87,8 +93,10 @@ Complete. All phases are implemented and the full stack has been verified
 end-to-end on both platforms as of 2026-07-17: self-hosted OTA delivery (marker
 bump -> Check/Download/Restart, distinct per-environment update ids) and the
 brownfield host integration in both Mode A and Mode B, on the iOS simulator and
-the Android emulator. Docs were written first (target design) and reconciled
-against the code in a closing audit; any deviation found while implementing was
-folded back into the corresponding doc in the same change. One known intermittent
-issue is tracked in [docs/brownfield.md](./docs/brownfield.md) (iOS later-mount
-blank, retained for repeated tab-cycle verification).
+the Android emulator. The iOS in-place Restart originally rebooted the
+previously-launched bundle; the fix (expo-updates launcher advance + release
+bundle-URL override) is documented in
+[docs/brownfield.md](./docs/brownfield.md). Docs were written first (target
+design) and reconciled against the code in a closing audit; any deviation found
+while implementing was folded back into the corresponding doc in the same
+change.

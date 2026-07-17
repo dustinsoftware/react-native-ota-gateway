@@ -18,8 +18,11 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-# Server runtime deps only. Versions track apps/mobile/package.json -- keep in
-# sync when bumping express / expo-server / tsx there.
+# Server runtime deps only. Versions must match apps/mobile/package.json
+# exactly -- the drift-guard suite (plugins/__tests__/drift-guard.test.ts)
+# fails `pnpm test` when they diverge. Transitive deps are deliberately
+# unpinned (`--no-package-lock`, caret ranges); acceptable for this
+# local-only test image, so no lockfile is copied in.
 RUN npm install --no-package-lock --omit=dev \
     express@^5.2.1 \
     expo-server@55.0.6 \

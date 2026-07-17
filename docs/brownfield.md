@@ -470,9 +470,10 @@ radio, "Use Metro dev server" toggle, and Relaunch. The former native-only
 
 ### Cleartext networking
 
-`res/xml/network_security_config.xml` must permit **cleartext for `localhost` and
-`10.0.2.2`** (API 28+ blocks `http` by default; without it OTA against the local
-servers silently fails). `DebugPrefs.kt` holds the pref accessors.
+`res/xml/network_security_config.xml` must permit **cleartext for `localhost`,
+`127.0.0.1`, and `10.0.2.2`** (API 28+ blocks `http` by default; without it OTA
+against the local servers silently fails). `DebugPrefs.kt` holds the pref
+accessors.
 
 ### Networking
 

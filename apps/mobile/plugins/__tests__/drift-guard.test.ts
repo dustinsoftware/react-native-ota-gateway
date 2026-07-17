@@ -130,3 +130,30 @@ describe('native host sources match the plugin coupling constants', () => {
     },
   );
 });
+
+describe('Dockerfile server runtime matches package.json', () => {
+  // The Mode B gateway image (apps/mobile/Dockerfile) installs the server's
+  // runtime deps by explicit version instead of reusing the pnpm workspace
+  // (the image deliberately excludes the RN/Expo dev tree). Those versions
+  // must track package.json, or the container serves a runtime the test suite
+  // never exercised. This pins each `name@version` in the Dockerfile's
+  // `npm install` block to the exact range declared in package.json.
+  const DOCKER_RUNTIME_DEPS = ['express', 'expo-server', 'tsx'] as const;
+
+  it('every npm-installed dependency version matches package.json', () => {
+    const dockerfile = readFileSync(path.join(APP_ROOT, 'Dockerfile'), 'utf8');
+    const packageJson = JSON.parse(
+      readFileSync(path.join(APP_ROOT, 'package.json'), 'utf8'),
+    );
+    const declared: Record<string, string> = {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+    };
+
+    for (const name of DOCKER_RUNTIME_DEPS) {
+      const match = dockerfile.match(new RegExp(`${name}@(\\S+)`));
+      expect(match, `Dockerfile must npm-install ${name}@<version>`).toBeTruthy();
+      expect(match?.[1], `Dockerfile pin for ${name}`).toBe(declared[name]);
+    }
+  });
+});
