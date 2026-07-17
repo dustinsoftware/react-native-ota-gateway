@@ -1,0 +1,49 @@
+# Edge case: the spinner's persisted coast must survive an arbitrary DETOUR
+# through other surfaces -- not just a single tab roundtrip. Spin it, visit the
+# More tab, push (and dismiss) an RN Test screen -- which mounts a different RN
+# surface on the nav stack and checkpoints its own state slice -- then return
+# to Spinner: still coasting. Pins that slices are independent (the Test 1
+# counter checkpoint must not clobber the spinner slice) and that the store
+# round-trips across shell tab surfaces AND pushed surfaces.
+# NOTE: no self-warm cycle -- run after any warming flow (e.g.
+# verify-spinner-persistence) when a fresh export was just deployed in Shipping mode.
+appId: com.regalcinemas.reactnativetest
+---
+- launchApp
+- tapOn:
+    id: "tab-spinner"
+- extendedWaitUntil:
+    visible:
+      id: "spinner-state"
+    timeout: 60000
+- swipe:
+    start: "40%, 38%"
+    end: "40%, 54%"
+    duration: 200
+- extendedWaitUntil:
+    visible: "spinning"
+    timeout: 5000
+
+# Detour: native menu -> pushed RN screen (its own state slice) -> back.
+- tapOn:
+    id: "tab-more"
+- assertVisible: "Test 1"
+- tapOn:
+    id: "item-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- tapOn:
+    id: "test-one-counter"
+- tapOn: "More"
+- assertVisible: "Test 3"
+
+# The spinner's slice must have survived the detour untouched.
+- tapOn:
+    id: "tab-spinner"
+- extendedWaitUntil:
+    visible:
+      id: "spinner-state"
+    timeout: 30000
+- assertVisible: "spinning"

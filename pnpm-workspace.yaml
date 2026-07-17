@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+  unrs-resolver: true
+
+nodeLinker: hoisted
+
+onlyBuiltDependencies:
+  - esbuild
+  - protobufjs
+  - unrs-resolver

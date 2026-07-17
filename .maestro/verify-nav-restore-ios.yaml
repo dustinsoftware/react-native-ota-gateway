@@ -1,0 +1,54 @@
+# Verifies per-tab navigation restoration (nav-restore seam) on iOS: a tab
+# surface that opted into restoreNavState resumes its last IN-SURFACE path
+# after the tab roundtrip tears the surface down (surface deallocation), instead
+# of resetting to the tab's initialUrl. Ends by navigating back to the tab
+# root so the persisted path is clean for other flows.
+# NOTE: no self-warm cycle -- run after any warming flow when a fresh export
+# was just deployed in Shipping mode.
+appId: com.regalcinemas.reactnativetest
+---
+- launchApp
+- tapOn:
+    id: "tab-developer"
+# Self-clean: a previous (or aborted) run may have left the tab's nav slice
+# deep in the surface -- if the restored Test 1 is showing, back out first so
+# the flow always starts from the tab root.
+- runFlow:
+    when:
+      visible:
+        id: "test-one-back-rn"
+    commands:
+      - tapOn:
+          id: "test-one-back-rn"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000
+
+# Navigate WITHIN the Developer tab's surface to Test 1.
+- tapOn:
+    id: "developer-link-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 15000
+
+# Tab roundtrip: Sky tears the surface down; returning must resume Test 1,
+# NOT reset to /developer.
+- tapOn:
+    id: "tab-sky"
+- tapOn:
+    id: "tab-developer"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+
+# RN-internal back returns to the tab root (and checkpoints /developer, so
+# the next flow's Developer tab starts clean).
+- tapOn:
+    id: "test-one-back-rn"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 15000

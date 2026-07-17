@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 28+ blocks cleartext HTTP by default. The demo OTA servers and Metro are
+  plain http on the loopback interface (reached via adb reverse on the
+  emulator), so cleartext must be permitted for localhost and the emulator host
+  alias 10.0.2.2. Without this, OTA against the local servers fails silently.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

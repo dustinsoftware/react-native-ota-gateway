@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".OtaHostApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.OtaHost">
+
+        <activity
+            android:name=".RNHostActivity"
+            android:exported="true"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- singleTop: a double-tapped RN "Open native Settings" button posts
+             two navigate messages; dedup them like the pushed Test screens. -->
+        <activity
+            android:name=".HostSettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title"
+            android:launchMode="singleTop"
+            android:parentActivityName=".RNHostActivity" />
+
+        <!-- Pushed RN screen (More tab Test 1/2). A dedicated activity per RN
+             surface is load-bearing (fresh OnBackPressedDispatcher per visit;
+             see RNScreenActivity). singleTop absorbs launcher-row double taps.
+             configChanges mirrors RNHostActivity so RN handles rotation itself. -->
+        <activity
+            android:name=".RNScreenActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize"
+            android:launchMode="singleTop"
+            android:parentActivityName=".RNHostActivity"
+            android:theme="@style/Theme.OtaHost.Pushed"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native pushed screen (More tab Test 3); same chrome as the RN ones. -->
+        <activity
+            android:name=".NativeTestActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:parentActivityName=".RNHostActivity"
+            android:theme="@style/Theme.OtaHost.Pushed" />
+
+    </application>
+
+</manifest>

@@ -1,0 +1,62 @@
+# Edge case (iOS): a manual RN reload while a PUSHED RN screen is on the
+# navigation stack. The pushed surface predates the restarted runtime and
+# cannot be rebuilt in place, so the shell pops to root before re-mounting the
+# selected tab (HostShellViewController.rebuildActiveSurface) -- without that
+# pop the user would come back to a dead surface. Reached end-to-end through
+# two seams under test: the More tab pushes RN Test 1, Test 1's RN-internal
+# link opens Test 2, Test 2's RN button opens the NATIVE settings sheet over
+# the pushed stack (navigate seam), and Reload RN restarts the runtime.
+#
+# After the reload: the settings sheet stays presented (it is modal, not on
+# the nav stack); Done must land on the SHELL's More menu -- the pushed Test
+# screens are gone -- and the tabs must still mount live surfaces.
+# NOTE: no self-warm cycle -- run after any warming flow when a fresh export
+# was just deployed in Shipping mode.
+appId: com.regalcinemas.reactnativetest
+---
+- launchApp
+- tapOn:
+    id: "tab-more"
+- assertVisible: "Test 1"
+- tapOn:
+    id: "item-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 60000
+- tapOn:
+    id: "test-one-link-test-two"
+- extendedWaitUntil:
+    visible:
+      id: "test-two-screen"
+    timeout: 15000
+
+# Open native Settings OVER the pushed RN stack and reload the runtime.
+- tapOn:
+    id: "test-two-open-settings"
+- extendedWaitUntil:
+    visible:
+      id: "reload-rn"
+    timeout: 15000
+- tapOn:
+    id: "reload-rn"
+# The runtime restart + pop-to-root + tab re-mount happen behind the sheet.
+- waitForAnimationToEnd:
+    timeout: 10000
+- tapOn:
+    id: "settings-done"
+
+# The pushed screens are gone: we land on the shell's More menu.
+- assertVisible: "Test 1"
+- assertVisible: "Test 3"
+
+# The tabs still mount live RN surfaces on the restarted runtime.
+- tapOn:
+    id: "tab-developer"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000
+- tapOn:
+    id: "tab-more"
+- assertVisible: "Test 1"

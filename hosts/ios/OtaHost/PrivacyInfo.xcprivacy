@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required-reason API declaration for the host's own code. Brownfield.swift
+	     and HostStateStore.swift both read and write UserDefaults (the selected
+	     OTA environment, the selected tab, and the persisted component-state
+	     slices), which is a required-reason API. Reason CA92.1 is "access info
+	     from the app itself" and is the correct one here: nothing is read from
+	     or written to another app or an app group.
+
+	     The pods bundled into OtaGatewayLib.framework ship their own manifests
+	     (React-Core_privacy.bundle, ExpoFileSystem_privacy.bundle, and so on);
+	     Apple aggregates those with this one. This file only covers the host.
+
+	     The host collects no data and does no tracking, so the collected-data
+	     and tracking-domain arrays are deliberately empty rather than absent. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

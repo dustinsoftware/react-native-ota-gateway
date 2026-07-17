@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Keychain access for expo-secure-store (the OTA staleness timestamp,
+	     src/utils/ota-timestamp.ts). A completely unsigned binary
+	     (CODE_SIGNING_ALLOWED=NO) has no entitlements at all, so SecItemAdd /
+	     SecItemCopyMatching fail with errSecMissingEntitlement and SecureStore
+	     silently never persists -- which makes the OTA gate treat every launch
+	     as stale. The host therefore builds ad-hoc signed (identity "-") with
+	     this file; no certificates or team are required for the simulator.
+
+	     How these reach a simulator binary: keeping signing ENABLED runs
+	     ProcessProductPackaging, which expands this file into
+	     OtaHost.app-Simulated.xcent, and the linker embeds that into the
+	     binary's __TEXT,__entitlements section -- which is where the simulator
+	     reads them. The ad-hoc code *signature* itself carries an empty
+	     entitlement dict, so `codesign -d --entitlements -` printing "[Dict]"
+	     on a simulator build is expected, not a symptom. Verify with
+	     `plutil -p <DerivedData>/.../OtaHost.app-Simulated.xcent`.
+
+	     Both values are written against $(PRODUCT_BUNDLE_IDENTIFIER) rather
+	     than a literal id. A hardcoded id breaks any build whose bundle id
+	     differs from it (e.g. a device build under a real team) with
+	     "provisioning profile ... doesn't match the entitlements file's value
+	     for the application-identifier entitlement". $(AppIdentifierPrefix)
+	     expands to the team prefix whenever Xcode can resolve a team on the
+	     build machine -- including team-free ad-hoc simulator builds, where it
+	     resolves one from the installed signing identities -- and to nothing
+	     when it cannot. The prefix is therefore machine-dependent; the access
+	     group stays app-private either way, so one file covers both. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	</array>
+	<key>application-identifier</key>
+	<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+</dict>
+</plist>

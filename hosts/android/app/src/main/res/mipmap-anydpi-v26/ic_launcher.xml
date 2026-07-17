@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive launcher icon, mirroring app.json's expo.android.adaptiveIcon.
+     background is the flat backgroundColor (#208AEF) rather than a set of
+     density-scaled copies of android-icon-background.png, because that source
+     image is a single uniform colour, so the rendered result is identical. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome" />
+</adaptive-icon>

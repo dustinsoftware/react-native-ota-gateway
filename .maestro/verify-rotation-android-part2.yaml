@@ -1,0 +1,22 @@
+# Part 2 of the Android rotation scenario: runs AFTER the runner rotated the
+# emulator to landscape, with no launchApp -- it attaches to the live screen.
+# The RN surface must have survived the rotation in place (configChanges; no
+# activity recreation): same counter value, still interactive, and Back still
+# lands on the native menu.
+appId: com.regalcinemas.reactnativetest
+---
+- assertVisible:
+    id: "test-one-screen"
+- assertVisible: "Taps: 2"
+# THE discriminator: "Taps" would survive even a recreation (host-state
+# restore), but the ephemeral session counter resets on any remount -- it can
+# only still read 2 if the surface truly survived the rotation in place.
+- assertVisible: "Session: 2"
+- tapOn:
+    id: "test-one-counter"
+- assertVisible: "Taps: 3"
+- tapOn:
+    id: "test-one-reset"
+- assertVisible: "Taps: 0"
+- pressKey: back
+- assertVisible: "Test 3"

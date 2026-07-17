@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Both taken from apps/mobile/app.json: expo.android.adaptiveIcon
+         .backgroundColor and the expo-splash-screen plugin's backgroundColor.
+         Keep them in step with app.json so host and RN app match. -->
+    <color name="ic_launcher_background">#208AEF</color>
+    <!-- Host-prefixed deliberately: the brownfield AAR already declares a
+         `splashscreen_background` (#FFFFFF, from expo-splash-screen). App
+         resources win over library resources in the merge, so reusing that name
+         would silently redefine it for the RN side too. -->
+    <color name="host_splashscreen_background">#208AEF</color>
+</resources>

@@ -1,0 +1,54 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+expo-env.d.ts
+
+# build output
+dist/
+# Retained OTA updates + their static files (generate-update-manifest.mjs)
+apps/mobile/.ota-archive/
+
+# OTA manifest code-signing keys (generate-code-signing-keys.mjs). This is a
+# public template with no shared key -- every clone generates its own pair.
+apps/mobile/certs/
+
+# generated native folders
+# apps/mobile/ios and apps/mobile/android are regenerated from Expo config
+# (app.json + app.config.ts + plugins/) via `pnpm --filter @ota-gateway/mobile
+# prebuild` and `brownfield package:ios`. Do not commit them; the Android
+# patches live in apps/mobile/patches/android-*.patch.
+apps/mobile/ios/
+apps/mobile/android/
+
+# generated native-module build output (local modules compiled during
+# `expo run:*` / prebuild, e.g. modules/host-environment/android/build/)
+apps/mobile/modules/*/android/build/
+
+# brownfield packaging output
+.brownfield/
+
+# generated iOS host project (XcodeGen writes it from project.yml) + its
+# xcodebuild derived-data output. The project.yml + OtaHost/ sources are tracked;
+# the generated .xcodeproj and build/ are not.
+hosts/ios/*.xcodeproj
+hosts/ios/build*/
+
+# generated Android host build output (the Gradle wrapper + sources are tracked;
+# build dirs, caches, and machine-local config are not)
+hosts/android/build/
+hosts/android/app/build/
+hosts/android/.gradle/
+hosts/android/.kotlin/
+hosts/android/local.properties
+hosts/android/.idea/
+
+# Metro
+.metro-health-check*
+
+# macOS
+.DS_Store
+
+# typescript
+*.tsbuildinfo

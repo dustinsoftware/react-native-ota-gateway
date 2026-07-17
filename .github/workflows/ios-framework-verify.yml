@@ -1,0 +1,103 @@
+name: iOS Framework Verify
+
+# MANUAL-ONLY (workflow_dispatch): packages the Release brownfield iOS
+# frameworks and runs the App Store versioning gate in
+# apps/mobile/scripts/package-ios.sh -- the same check altool performs on a
+# host IPA's embedded OtaGatewayLib.framework at upload time (ITMS-90057).
+# Dispatch it on a PR branch before merging a packaging-affecting change, or on
+# main. It must NEVER run automatically: an iOS build from source takes 1-2
+# hours of macOS runner time.
+#
+#   gh workflow run ios-framework-verify.yml --ref <branch>
+#
+# The packaged xcframeworks are uploaded as a workflow artifact so a green run
+# can also be smoke-tested in the hosts/ios app.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-framework-verify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package-ios:
+    name: package Release + App Store versioning gate
+    # GitHub-hosted macos-26 carries the Xcode 26 toolchain this repo builds
+    # with locally.
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        # Hosted images ship several Xcode versions; pin the newest 26.x
+        # instead of trusting the image default, and fail fast (listing what
+        # IS installed) when the image has no 26.x at all.
+        run: |
+          XCODE_APP=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_APP" ]; then
+            echo "ERROR: no Xcode 26.x on this runner image. Installed versions:"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install ccache
+        # Best-effort: package-ios.sh auto-detects ccache and builds without it
+        # when absent. The cache below makes repeat dispatches much faster.
+        run: command -v ccache >/dev/null 2>&1 || brew install ccache || true
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-ios-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'apps/mobile/app.json') }}
+          restore-keys: ccache-ios-${{ runner.os }}-
+
+      - name: Package iOS brownfield frameworks (Release)
+        # Runs expo prebuild + pod install + device/sim builds + XCFramework
+        # merge, then the App Store versioning gate: the job FAILS here if any
+        # OtaGatewayLib.framework slice is missing CFBundleShortVersionString
+        # or is stamped with a version other than app.json's expo.version.
+        #
+        # --configuration Release is pinned deliberately. A bare package-ios.sh
+        # builds BOTH configurations (Debug then Release) so a release cut is one
+        # command; here that would roughly double an already 1-2 hour macOS job
+        # for a check whose job is proving the Release build works, not producing
+        # publishable assets. The Debug pass is exercised at release time. Drop
+        # the flag if you want this to catch Debug-only breakage too.
+        #
+        # Invoked directly rather than through `pnpm --filter ...
+        # brownfield:package:ios --configuration Release`, which forwards the flag
+        # correctly too (verified on pnpm 10): the flag belongs to this script, so
+        # calling it is one less layer to reason about. Bypassing `--filter` means
+        # supplying the cwd it would have set -- the brownfield CLI resolves the
+        # Expo project from the cwd -- hence working-directory below.
+        working-directory: apps/mobile
+        run: CCACHE_DIR="$HOME/.ccache" ./scripts/package-ios.sh --configuration Release
+
+      - name: Report packaged version
+        run: node -p "require('./apps/mobile/app.json').expo.version"
+
+      - name: Upload packaged frameworks
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-brownfield-frameworks-${{ github.sha }}
+          path: apps/mobile/ios/.brownfield/package/build
+          retention-days: 7

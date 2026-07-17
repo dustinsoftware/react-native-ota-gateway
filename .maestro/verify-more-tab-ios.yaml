@@ -1,0 +1,149 @@
+# Verifies the More tab's mix-and-match demo on the iOS host (Shipping mode):
+# native menu -> pushed RN screens (Test 1/2) via the navigation stack (native
+# nav-bar title + back chevron), RN-internal navigation, a second visit, and
+# the native Test 3 screen pushing an RN screen on top.
+#
+# The iOS back chevron carries the PREVIOUS screen's title as its label, so
+# "More" taps the back button while a Test screen is pushed (the shell's own
+# "More" title and tab bar are covered by the pushed screen).
+#
+# Preconditions: simulator booted, gateway containers serving the current
+# export, host app installed (Release framework -> Shipping mode).
+appId: com.regalcinemas.reactnativetest
+---
+# Self-warm: a fresh export is applied on the SECOND launch (expo-updates
+# downloads in the background and applies on relaunch), and the new /test-one
+# route exists only in the fresh bundle -- without this cycle the flow would
+# assert against the previous bundle.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "tab-developer"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 10000
+- stopApp
+# The shell restores the persisted tab, so select Developer explicitly before
+# asserting the OTA marker (a previous run may have left the app on More).
+- launchApp
+- tapOn:
+    id: "tab-developer"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000
+
+# The native More tab shows the Test menu (no RN surface mounted).
+- tapOn:
+    id: "tab-more"
+- assertVisible: "Test 1"
+- assertVisible: "Test 2"
+- assertVisible: "Test 3"
+
+# Visit 1: RN Test 1 pushed on the nav stack. Reset first (the counter
+# PERSISTS via the host-state seam, so a previous run's value may be showing),
+# then prove live RN state.
+- tapOn:
+    id: "item-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- tapOn:
+    id: "test-one-reset"
+- assertVisible: "Taps: 0"
+- tapOn:
+    id: "test-one-counter"
+- assertVisible: "Taps: 1"
+
+# RN-internal push: Test 1 -> Test 2 inside the same pushed surface, then the
+# RN-side back button pops back to Test 1 before the native back closes it.
+- tapOn:
+    id: "test-one-link-test-two"
+- extendedWaitUntil:
+    visible:
+      id: "test-two-screen"
+    timeout: 15000
+- tapOn:
+    id: "test-two-back-rn"
+- assertVisible:
+    id: "test-one-screen"
+- tapOn: "More"
+- assertVisible: "Test 3"
+
+# Visit 2: a second push must render and close cleanly. The counter shows the
+# PERSISTED value from visit 1 (the host-state seam round-trip), then is reset
+# to leave the store clean for the next run.
+- tapOn:
+    id: "item-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- assertVisible: "Taps: 1"
+- tapOn:
+    id: "test-one-reset"
+- assertVisible: "Taps: 0"
+- tapOn: "More"
+- assertVisible: "Test 3"
+
+# RN Test 2 pushed directly from the menu (no route bleed).
+- tapOn:
+    id: "item-test-two"
+- extendedWaitUntil:
+    visible:
+      id: "test-two-screen"
+    timeout: 30000
+
+# RN -> native navigation: the RN button asks the HOST to present its native
+# Settings sheet over this RN surface (navigate message); Done returns to the
+# still-mounted RN screen.
+- tapOn:
+    id: "test-two-open-settings"
+- extendedWaitUntil:
+    visible:
+      id: "settings-done"
+    timeout: 15000
+- tapOn:
+    id: "settings-done"
+- assertVisible:
+    id: "test-two-screen"
+- tapOn: "More"
+- assertVisible: "Test 3"
+
+# Native Test 3, which pushes RN Test 1 on top (native -> RN mixing).
+- tapOn:
+    id: "item-test-three"
+- assertVisible: "Push RN Test 1"
+- tapOn:
+    id: "button-push-rn-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- tapOn: "Test 3"
+- assertVisible: "Push RN Test 1"
+- tapOn: "More"
+- assertVisible: "Test 2"
+
+# The RN tabs still work after all the pushing, including under repeated
+# cycling (the documented iOS later-mount blank class -- see docs/brownfield.md
+# gotchas).
+- repeat:
+    times: 3
+    commands:
+      - tapOn:
+          id: "tab-developer"
+      - extendedWaitUntil:
+          visible:
+            id: "bundle-marker"
+          timeout: 60000
+      - tapOn:
+          id: "tab-more"
+      - assertVisible: "Test 1"
+- tapOn:
+    id: "tab-developer"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000

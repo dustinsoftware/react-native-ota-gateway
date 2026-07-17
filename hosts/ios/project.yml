@@ -1,0 +1,95 @@
+# XcodeGen project for the iOS brownfield host.
+#
+# Demo host, simulator by default and ad-hoc signed (see the signing note
+# below); device and App Store builds are per-build overrides documented in
+# docs/brownfield.md ("Running on a physical device"). The
+# .xcodeproj is generated from this file (`xcodegen generate`) and gitignored;
+# regenerate it after editing this file or after repackaging the frameworks.
+#
+# Frameworks come from the apps/mobile iOS packaging output
+# (ios/.brownfield/package/build), produced by scripts/package-ios.sh. Run that
+# first -- xcodegen fails if the .xcframework paths below do not exist.
+#
+# Framework rules (load-bearing -- see docs/brownfield.md):
+#   OtaGatewayLib.xcframework  -> Link + Embed & Sign
+#   hermesvm.xcframework       -> Embed & Sign (not linked; loaded at runtime)
+#   ReactBrownfield.xcframework-> Link only (interface-only; binary stripped,
+#                                 its symbols are already inside OtaGatewayLib)
+#   Expo.plist                 -> Copy Bundle Resources (exact name, main bundle;
+#                                 expo-updates looks it up by name)
+name: OtaHost
+options:
+  # No bundleIdPrefix: it only synthesises PRODUCT_BUNDLE_IDENTIFIER for targets
+  # that do not set one, and the sole target sets it explicitly below. Leaving a
+  # prefix here just advertises a second, wrong answer to "what is the app id".
+  deploymentTarget:
+    iOS: "15.1"
+  createIntermediateGroups: true
+
+# Ad-hoc signing (identity "-"): free -- no certificates or team. What matters
+# is that code signing stays ENABLED: that runs ProcessProductPackaging, which
+# expands OtaHost.entitlements into OtaHost.app-Simulated.xcent, and the linker
+# embeds it into the binary's __TEXT,__entitlements section -- where the
+# simulator reads the keychain entitlements expo-secure-store needs.
+# CODE_SIGNING_ALLOWED=NO skips packaging entirely: no .xcent, no
+# __TEXT,__entitlements, and SecureStore silently stops persisting. Do NOT pass
+# it on the xcodebuild command line for a host you intend to run; it overrides
+# these settings and re-breaks SecureStore. (A build made only to inspect the
+# packaged Info.plist/resources is fine unsigned -- it is never launched.)
+settings:
+  base:
+    CODE_SIGNING_ALLOWED: YES
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: "-"
+
+targets:
+  OtaHost:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.1"
+    sources:
+      - path: OtaHost
+        excludes:
+          - PrivacyInfo.xcprivacy
+      # Declared explicitly rather than swept in by the directory above: it must
+      # land in Copy Bundle Resources at the .app root or App Store upload fails
+      # ITMS-91053, and xcodegen only puts it there by its fallback rule for
+      # unrecognised extensions. Same reasoning as Expo.plist below.
+      - path: OtaHost/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: ../../apps/mobile/ios/.brownfield/package/build/Expo.plist
+        buildPhase: resources
+        group: Frameworks
+    settings:
+      base:
+        INFOPLIST_FILE: OtaHost/Info.plist
+        CODE_SIGN_ENTITLEMENTS: OtaHost/OtaHost.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        # Load-bearing for App Store distribution: this is what makes actool
+        # emit CFBundleIconName into the built Info.plist. Without an AppIcon
+        # set in Assets.xcassets, upload fails validation with "Missing
+        # Info.plist value ... CFBundleIconName". Xcode defaults this to
+        # AppIcon; it is written out here so the dependency is visible.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: com.regalcinemas.reactnativetest
+        PRODUCT_NAME: OtaHost
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/../../apps/mobile/ios/.brownfield/package/build
+    dependencies:
+      - framework: ../../apps/mobile/ios/.brownfield/package/build/OtaGatewayLib.xcframework
+        embed: true
+        codeSign: true
+        link: true
+      - framework: ../../apps/mobile/ios/.brownfield/package/build/hermesvm.xcframework
+        embed: true
+        codeSign: true
+        link: false
+      - framework: ../../apps/mobile/ios/.brownfield/package/build/ReactBrownfield.xcframework
+        embed: false
+        link: true

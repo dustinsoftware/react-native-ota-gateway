@@ -1,0 +1,30 @@
+# Standalone OTA gateway instances for Shipping-mode (release artifact) testing.
+#
+# Shipping mode must be served from these containers -- never from a host-run dev
+# server -- so the served artifact is exactly the baked export with no
+# dev/reload machinery. Metro mode (local hot reload) does NOT use these; it runs
+# Metro via `pnpm --filter @ota-gateway/mobile start`.
+#
+# Usage (dist/ must exist -- run `pnpm --filter @ota-gateway/mobile export`
+# first; re-run with --build after every re-export so the image picks it up):
+#   docker compose up --build -d
+#   docker compose down
+#
+# gateway-dev  -> http://localhost:3000  (development environment)
+# gateway-prod -> http://localhost:3001  (production environment)
+services:
+  gateway-dev:
+    build: ./apps/mobile
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      OTA_ENVIRONMENT: development
+
+  gateway-prod:
+    build: ./apps/mobile
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      OTA_ENVIRONMENT: production

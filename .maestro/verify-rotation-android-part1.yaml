@@ -1,0 +1,28 @@
+# Part 1 of the Android rotation scenario (run via run-rotation-android.sh:
+# Maestro cannot rotate the emulator, so the runner rotates between parts).
+# Pushes RN Test 1 in its own activity and sets a known counter value. The
+# pushed activity declares configChanges for orientation, so React Native --
+# not an activity recreation -- handles the rotation in part 2.
+appId: com.regalcinemas.reactnativetest
+---
+- launchApp
+- tapOn: "More"
+- assertVisible: "Test 1"
+- tapOn: "Test 1"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 60000
+- tapOn:
+    id: "test-one-reset"
+- assertVisible: "Taps: 0"
+- tapOn:
+    id: "test-one-counter"
+- tapOn:
+    id: "test-one-counter"
+- assertVisible: "Taps: 2"
+# "Session: 2" is the in-place-survival discriminator for part 2: "Taps"
+# PERSISTS via the host-state seam, so a recreated surface would restore it
+# and look identical -- the session counter is ephemeral and resets on any
+# remount.
+- assertVisible: "Session: 2"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash screen, mirroring app.json's
+         expo-splash-screen config (backgroundColor #208AEF, the splash-icon
+         image at 76dp). The platform shows this automatically on cold start
+         from the launch activity's theme, so no manifest or Activity change is
+         needed. Below API 31 there is no splash, because
+         windowSplashScreenBackground and windowSplashScreenAnimatedIcon are
+         platform attributes added in 31 and the pre-31 equivalent needs a
+         windowBackground swap in onCreate that is not worth the risk here.
+
+         The parent and name are repeated from values/themes.xml because a
+         qualified resource replaces the whole style rather than merging into
+         it. Keep the parent in step with the base theme. -->
+    <style name="Theme.OtaHost" parent="Theme.MaterialComponents.DayNight.NoActionBar.Bridge">
+        <item name="android:windowSplashScreenBackground">@color/host_splashscreen_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splashscreen_logo</item>
+    </style>
+</resources>
