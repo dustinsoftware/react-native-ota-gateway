@@ -102,8 +102,10 @@ const INITIALIZE_UPDATES = `
   /// overridden after the controller is created, so switching environments
   /// requires an app restart.
   ///
-  /// In Debug builds this also installs a \`bundleURLOverride\` pointing at the
-  /// local Metro dev server (Mode A local hot reload); see the inline note below.
+  /// Also installs the \`bundleURLOverride\` for the build configuration: Debug
+  /// points at the local Metro dev server (Mode A local hot reload); Release
+  /// resolves expo-updates' launch asset so surfaces boot the launched OTA
+  /// update rather than the framework's embedded bundle. See the inline notes.
   public func initializeUpdates(environment: OtaUpdatesEnvironment) {
     // Publish the host's selection to the JS layer (modules/host-environment)
     // BEFORE React Native starts, so the app resolves its gateway URL from the
@@ -133,6 +135,22 @@ const INITIALIZE_UPDATES = `
         inlineSourceMap: false
       )
     }
+#else
+    // Mode B (release): every brownfield surface must boot the bundle
+    // expo-updates LAUNCHED, not the framework's embedded copy. The brownfield
+    // runtime pins \`delegate.bundleURL()\` into each new RCTHost
+    // (recreateRootView -> bundleURLBlock), and the delegate's release fallback
+    // is the embedded main.jsbundle -- so without this override a runtime
+    // restart after an OTA download boots stale bytes and the freshly-applied
+    // update never renders. \`launchAssetUrl()\` is nil until the AppController
+    // startup procedure finishes; the embedded bundle is the correct launch
+    // fallback in that window (expo-updates swaps in the update on the next
+    // surface rebuild).
+    let bundle = self.bundle
+    self.bundleURLOverride = {
+      AppController.sharedInstance.launchAssetUrl()
+        ?? bundle.url(forResource: "main", withExtension: "jsbundle")
+    }
 #endif
     let key = environment == .production
       ? "${PLIST_KEY_PROD}"
@@ -148,6 +166,32 @@ const INITIALIZE_UPDATES = `
     let controller = AppController.sharedInstance
     if controller.isActiveController {
       controller.start()
+    }
+  }
+
+  /// Bridge-reload companion to \`initializeUpdates\`: advance expo-updates'
+  /// launcher to the newest downloaded update, then call \`completion\` on the
+  /// main thread. \`Updates.fetchUpdateAsync()\` only writes the update to the
+  /// database -- nothing boots it until a RelaunchProcedure swaps the launcher,
+  /// which in standalone apps happens inside \`reloadAsync()\` (unusable in
+  /// brownfield). Call this BETWEEN \`stopReactNative()\` and
+  /// \`startReactNative()\`: with no live RCTHost the procedure's RCT reload
+  /// trigger is a no-op, and the next surface boots the new launch asset via
+  /// the release \`bundleURLOverride\` installed by \`initializeUpdates\`.
+  ///
+  /// Always completes -- on failure (or when updates are disabled) the runtime
+  /// restarts on the current launcher rather than wedging the reload.
+  public func relaunchUpdates(completion: @escaping () -> Void) {
+    let controller = AppController.sharedInstance
+    guard controller.isActiveController else {
+      DispatchQueue.main.async { completion() }
+      return
+    }
+    controller.requestRelaunch {
+      DispatchQueue.main.async { completion() }
+    } error: { error in
+      NSLog("[OtaGatewayLib] relaunchUpdates failed; restarting on current bundle: %@", error.description)
+      DispatchQueue.main.async { completion() }
     }
   }
 `;

@@ -1,3 +1,4 @@
+import OtaGatewayLib
 import ReactBrownfield
 import UIKit
 
@@ -43,16 +44,27 @@ final class BrownfieldReloader {
     /// relationship, not the reverse.
     weak var host: BrownfieldReloadHost?
 
-    /// Restarts the RN runtime. Injected so tests can substitute it.
-    private let restartRuntime: () -> Void
+    /// Restarts the RN runtime, calling the completion (on the main thread)
+    /// once the new runtime is ready for surfaces. Injected so tests can
+    /// substitute it.
+    private let restartRuntime: (@escaping () -> Void) -> Void
 
     /// Builds the view controller for a screen. Injected so tests can substitute it.
     private let makeScreenViewController: (BrownfieldScreen) -> UIViewController
 
     init(
-        restartRuntime: @escaping () -> Void = {
+        restartRuntime: @escaping (@escaping () -> Void) -> Void = { completion in
+            // Order is load-bearing: stop RN FIRST so the relaunch procedure's
+            // RCT reload trigger fires with no live host (a live one would
+            // reload the brownfield root out from under the shell -- the
+            // documented reloadAsync crash). relaunchUpdates then advances
+            // expo-updates to the downloaded update so the restarted runtime
+            // boots it instead of the stale launcher/embedded bundle.
             ReactNativeBrownfield.shared.stopReactNative()
-            ReactNativeBrownfield.shared.startReactNative()
+            ReactNativeBrownfield.shared.relaunchUpdates {
+                ReactNativeBrownfield.shared.startReactNative()
+                completion()
+            }
         },
         makeScreenViewController: @escaping (BrownfieldScreen) -> UIViewController = { screen in
             let viewController = ReactNativeViewController(
@@ -79,6 +91,20 @@ final class BrownfieldReloader {
     }
 
     private var entries: [Entry] = []
+
+    /// True while a restart is in flight. Reload requests arriving in that
+    /// window are dropped: the restarted runtime already boots the newest
+    /// update, so a queued second restart could only tear down a healthy
+    /// surface (or, if the JS re-posts reload on boot, loop forever).
+    private var isReloading = false
+
+    /// Whether a runtime restart is currently in flight. The host shell checks
+    /// this before mounting a surface: between `stopReactNative()` and the
+    /// restart completion the runtime is down, so a mount (e.g. a tab switch
+    /// landing in that window) would build a surface on a dead runtime. The
+    /// completion rebuilds the selected tab's surface, so a skipped mount is
+    /// recovered, not lost.
+    var isRestartInFlight: Bool { isReloading }
 
     /// Number of tracked screens. Exposed for unit tests to assert pruning.
     var trackedScreenCount: Int { entries.count }
@@ -119,23 +145,32 @@ final class BrownfieldReloader {
         }
     }
 
-    /// Synchronous reload body. Internal only so tests can drive it directly;
-    /// production reaches it through `reload()`, which guarantees the main thread.
+    /// Reload body. Internal only so tests can drive it directly; production
+    /// reaches it through `reload()`, which guarantees the main thread.
     func performReload() {
         dispatchPrecondition(condition: .onQueue(.main))
+
+        guard !isReloading else { return }
 
         entries.removeAll { $0.viewController == nil }
 
         // Only restart when a surface is actually on screen and a host can
         // rebuild it; otherwise a reload would tear down the runtime with no
         // surface to bring back.
-        guard let host, entries.contains(where: { $0.viewController != nil }) else {
+        guard host != nil, entries.contains(where: { $0.viewController != nil }) else {
             return
         }
 
-        restartRuntime()
-        host.rebuildActiveSurface()
-
-        entries.removeAll { $0.viewController == nil }
+        isReloading = true
+        restartRuntime { [weak self] in
+            // The injected restartRuntime must complete on the main thread
+            // (the default routes through relaunchUpdates, which guarantees
+            // it); assert so a future injection can't silently violate it.
+            dispatchPrecondition(condition: .onQueue(.main))
+            guard let self else { return }
+            self.isReloading = false
+            self.host?.rebuildActiveSurface()
+            self.entries.removeAll { $0.viewController == nil }
+        }
     }
 }

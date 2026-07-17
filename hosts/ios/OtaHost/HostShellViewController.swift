@@ -104,6 +104,12 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
     /// Mount the single RN surface for a tab, tearing down the previous one
     /// first so only one ExpoRoot surface is ever live.
     private func mountSurface(for tab: HostTab) {
+        // While a runtime restart is in flight the RN runtime is down; a
+        // surface mounted now (e.g. a tab switch landing in that window)
+        // would sit on a dead runtime. Skip it -- the restart completion
+        // calls rebuildActiveSurface(), which mounts the selected tab fresh.
+        guard !BrownfieldReloader.shared.isRestartInFlight else { return }
+
         removeCurrentSurface()
 
         let controller = BrownfieldReloader.shared.makeViewController(

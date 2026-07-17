@@ -113,13 +113,21 @@ JS layer before RN boots.
     `HostEnvironmentRegistry` (`modules/host-environment`), so
     `src/api/gateway-url.ts` resolves the gateway from the live host selection
     rather than a baked or OTA-cached value;
-  - under `#if DEBUG` only, installs a `bundleURLOverride` that resolves the
+  - under `#if DEBUG`, installs a `bundleURLOverride` that resolves the
     Metro packager URL directly (honoring an explicit `RCT_jsLocation`, else
     `localhost:8081`) and returns it **before** `RCTBundleURLProvider`'s
     `/status` reachability probe (which is flaky on fresh installs and, when it
-    fails, leaves the bundle URL nil -- the "No script URL provided" RedBox).
-    Compiled out of Release, so it never coexists with expo-updates owning the
-    URL.
+    fails, leaves the bundle URL nil -- the "No script URL provided" RedBox);
+  - in Release, installs a `bundleURLOverride` resolving
+    `AppController.launchAssetUrl()` (falling back to the framework's embedded
+    `main.jsbundle` while startup is in flight). Required because the
+    brownfield runtime pins `delegate.bundleURL()` into every new RCTHost;
+    without the override a restarted runtime boots the embedded bundle and OTA
+    updates never render in place (see the reloader section below);
+  - exposes `relaunchUpdates(completion:)`, the bridge-reload companion:
+    advances expo-updates' launcher to the newest downloaded update via
+    `requestRelaunch`. The host calls it between `stopReactNative()` and
+    `startReactNative()`.
 - **Android
   `android/otagatewaylib/src/main/java/dev/otagateway/ReactNativeHostManager.kt`**
   -- injects an `OtaUpdatesEnvironment` enum (URLs baked at prebuild), **demotes
@@ -266,34 +274,35 @@ selection first removes the current `ReactNativeViewController`, then creates a
 new tracked controller through `BrownfieldReloader` with `/developer`, `/sky`,
 or `/spinner` as `initialUrl`.
 
-The reloader tracks the one live RN controller weakly. On reload it stops and
-restarts RN, then asks the host shell to recreate the currently selected route.
-The native shell, selected tab, and presented settings controller remain in
-place. `Updates.reloadAsync()` is never called from the host (it crashes in
-brownfield); the JS side posts `{ type: 'reload' }`.
+The reloader tracks the one live RN controller weakly. On reload it (1) stops
+RN, (2) calls `OtaGatewayLib.relaunchUpdates` -- which runs expo-updates'
+`requestRelaunch` to advance the launcher to the newest downloaded update --
+and (3) on completion restarts RN and asks the host shell to recreate the
+currently selected route. The native shell, selected tab, and presented
+settings controller remain in place. `Updates.reloadAsync()` is never called
+from the host (it crashes in brownfield); the JS side posts
+`{ type: 'reload' }`. A reload arriving while a restart is in flight is
+dropped (`isReloading` guard).
 
-> **Known issue (open; identical to the eng-regal-hybrid-app / eng-ios
-> integration on purpose).** On iOS, the in-place Restart after a manual
-> Check/Download does NOT boot the freshly-downloaded update: the restarted
-> runtime reloads the previously-launched bundle, and only a full process
-> relaunch applies the update. Root cause: `fetchUpdateAsync` only writes the
-> updates database -- the live launcher is advanced exclusively by an
-> expo-updates `RelaunchProcedure` (what `reloadAsync()` runs internally,
-> unusable in brownfield), and the brownfield stop/start path never runs one.
-> Verified here end-to-end with the bundle marker (Restart -> old marker +
-> old update id; process relaunch -> new marker + new id) and confirmed by
-> the same symptom on eng-ios. A working fix exists (see the reverted
-> prototype: `requestRelaunch` between `stopReactNative()` and
-> `startReactNative()`, plus a release `bundleURLOverride` resolving
-> `AppController.launchAssetUrl()`); it is intentionally not applied while
-> this repo serves as the 1:1 repro of the production integration.
->
+**Both the relaunch step and its ordering are load-bearing** (this fixed a
+real bug: without them, Restart rebooted the previously-launched bundle and
+only a process relaunch applied the update -- the same defect exists in the
+eng-ios integration). `Updates.fetchUpdateAsync()` only writes the update to
+the database; nothing boots it until a `RelaunchProcedure` swaps the launcher.
+And the brownfield runtime pins `delegate.bundleURL()` into every new RCTHost
+(`recreateRootView` -> `bundleURLBlock`), whose release fallback is the
+framework's **embedded** bundle -- hence the release `bundleURLOverride`
+(installed by `initializeUpdates`) resolving `AppController.launchAssetUrl()`.
+Stopping RN BEFORE `requestRelaunch` matters too: the procedure fires an RCT
+reload trigger that is a no-op with no live host but would reload a live
+brownfield root out from under the shell (the documented `reloadAsync` crash).
+
 > Historical footnote: when the host was built UNSIGNED
 > (`CODE_SIGNING_ALLOWED=NO`), broken SecureStore persistence made the OTA
-> gate treat every launch as stale, which amplified this staleness bug into
-> an infinite reload loop (~12Hz runtime churn, blank surface, process
-> death). Ad-hoc signing fixed the persistence; the staleness bug above
-> remains.
+> gate treat every launch as stale, which amplified the pre-fix staleness bug
+> into an infinite reload loop (~12Hz runtime churn, blank surface, process
+> death). Ad-hoc signing fixed the persistence (see the iOS host section);
+> the relaunch seam above fixed the staleness.
 
 ### Host Settings
 

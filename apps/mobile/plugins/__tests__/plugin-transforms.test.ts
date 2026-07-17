@@ -68,16 +68,28 @@ describe('injectSwiftUpdates (withBrownfieldUpdates)', () => {
     // The template already imports Foundation; no duplicate may be added.
     expect(count(out, 'import Foundation')).toBe(1);
     expect(out).toContain('public enum OtaUpdatesEnvironment');
-    // The Mode A dev-server bundle URL override, gated to Debug builds. The
-    // gating is the correctness premise (Release must keep using expo-updates),
-    // so assert the override lives strictly inside a single #if DEBUG block --
-    // not just that it exists somewhere in the output.
-    expect(out).toContain('self.bundleURLOverride =');
-    expect(out).toContain('RCTBundleURLProvider.jsBundleURL(');
+    // Both bundle URL overrides, one per build configuration. The gating is
+    // the correctness premise -- Debug must point at Metro (Mode A), Release
+    // must resolve expo-updates' launch asset (in-place OTA Restart boots the
+    // downloaded update instead of the embedded bundle) -- so assert each
+    // override lives strictly inside its branch of a single #if DEBUG/#else
+    // block, not just that they exist somewhere in the output.
     expect(count(out, '#if DEBUG')).toBe(1);
-    const debugBlock = out.slice(out.indexOf('#if DEBUG'), out.indexOf('#endif'));
+    expect(count(out, 'self.bundleURLOverride =')).toBe(2);
+    const debugBlock = out.slice(out.indexOf('#if DEBUG'), out.indexOf('#else'));
+    const releaseBlock = out.slice(out.indexOf('#else'), out.indexOf('#endif'));
     expect(debugBlock).toContain('self.bundleURLOverride =');
     expect(debugBlock).toContain('RCTBundleURLProvider.jsBundleURL(');
+    expect(releaseBlock).toContain('self.bundleURLOverride =');
+    expect(releaseBlock).toContain('AppController.sharedInstance.launchAssetUrl()');
+    expect(releaseBlock).not.toContain('RCTBundleURLProvider');
+    // The bridge-reload companion that advances the launcher to the newest
+    // downloaded update (the host calls it between stop and start). Pin the
+    // requestRelaunch call inside the method body, not just anywhere in the
+    // output (a doc-comment mention alone must not satisfy this).
+    expect(count(out, 'func relaunchUpdates')).toBe(1);
+    const relaunchBody = out.slice(out.indexOf('func relaunchUpdates'));
+    expect(relaunchBody).toContain('controller.requestRelaunch');
   });
 
   it('publishes the host environment to the JS layer before starting updates', () => {
