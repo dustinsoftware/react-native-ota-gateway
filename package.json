@@ -1,0 +1,12 @@
+{
+  "name": "react-native-ota-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "export": "pnpm --filter @ota-gateway/mobile export",
+    "server:dev": "PORT=3000 pnpm --filter @ota-gateway/mobile run server",
+    "server:prod": "PORT=3001 OTA_ENVIRONMENT=production pnpm --filter @ota-gateway/mobile run server",
+    "test": "pnpm --filter @ota-gateway/mobile run test",
+    "typecheck": "pnpm --filter @ota-gateway/mobile run typecheck"
+  }
+}

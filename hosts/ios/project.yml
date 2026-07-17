@@ -1,0 +1,66 @@
+# XcodeGen project for the iOS brownfield host.
+#
+# Simulator-only demo host (CODE_SIGNING_ALLOWED=NO). The .xcodeproj is
+# generated from this file (`xcodegen generate`) and gitignored; regenerate it
+# after editing this file or after repackaging the frameworks.
+#
+# Frameworks come from the apps/mobile iOS packaging output
+# (ios/.brownfield/package/build), produced by scripts/package-ios.sh. Run that
+# first -- xcodegen fails if the .xcframework paths below do not exist.
+#
+# Framework rules (load-bearing -- see docs/brownfield.md):
+#   OtaGatewayLib.xcframework  -> Link + Embed & Sign
+#   hermesvm.xcframework       -> Embed & Sign (not linked; loaded at runtime)
+#   ReactBrownfield.xcframework-> Link only (interface-only; binary stripped,
+#                                 its symbols are already inside OtaGatewayLib)
+#   Expo.plist                 -> Copy Bundle Resources (exact name, main bundle;
+#                                 expo-updates looks it up by name)
+name: OtaHost
+options:
+  bundleIdPrefix: dev.otagateway
+  deploymentTarget:
+    iOS: "15.1"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ""
+
+targets:
+  OtaHost:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.1"
+    sources:
+      - path: OtaHost
+      - path: ../../apps/mobile/ios/.brownfield/package/build/Expo.plist
+        buildPhase: resources
+        group: Frameworks
+    settings:
+      base:
+        INFOPLIST_FILE: OtaHost/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        PRODUCT_BUNDLE_IDENTIFIER: dev.otagateway.host
+        PRODUCT_NAME: OtaHost
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/../../apps/mobile/ios/.brownfield/package/build
+    dependencies:
+      - framework: ../../apps/mobile/ios/.brownfield/package/build/OtaGatewayLib.xcframework
+        embed: true
+        codeSign: true
+        link: true
+      - framework: ../../apps/mobile/ios/.brownfield/package/build/hermesvm.xcframework
+        embed: true
+        codeSign: true
+        link: false
+      - framework: ../../apps/mobile/ios/.brownfield/package/build/ReactBrownfield.xcframework
+        embed: false
+        link: true
