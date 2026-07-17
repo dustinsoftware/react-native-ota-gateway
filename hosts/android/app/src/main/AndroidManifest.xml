@@ -13,9 +13,11 @@
         android:theme="@style/Theme.OtaHost">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".RNHostActivity"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -23,10 +25,10 @@
         </activity>
 
         <activity
-            android:name=".RNHostActivity"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize"
+            android:name=".HostSettingsActivity"
             android:exported="false"
-            android:windowSoftInputMode="adjustResize" />
+            android:label="@string/settings_title"
+            android:parentActivityName=".RNHostActivity" />
 
     </application>
 

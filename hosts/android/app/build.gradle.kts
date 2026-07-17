@@ -98,9 +98,14 @@ dependencies {
     // it (<version>-SNAPSHOT). plugins/__tests__/drift-guard.test.ts enforces this.
     implementation("dev.otagateway:otagatewaylib:0.1.0-SNAPSHOT")
 
-    // Minimal androidx surface for a native host with two Activities that host
-    // a brownfield fragment. No Compose, no DI framework.
+    // Minimal androidx surface for a native host whose launcher shell hosts a
+    // brownfield fragment plus a settings Activity. No Compose, no DI framework.
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("androidx.core:core-ktx:1.13.1")
+
+    // Material Components for the standard native BottomNavigationView chrome in
+    // the host shell (RNHostActivity). 1.12.0 is the current stable release and
+    // is compatible with compileSdk 36 and androidx.appcompat 1.7.0.
+    implementation("com.google.android.material:material:1.12.0")
 }

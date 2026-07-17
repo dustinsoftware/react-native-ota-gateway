@@ -9,12 +9,49 @@ enum Brownfield {
     static let moduleName = "OtaGatewayApp"
     /// Key of the initial-URL entry in an RN screen's `initialProperties`.
     static let initialUrlKey = "initialUrl"
-    /// RN route for the home screen.
-    static let homeRoute = "/"
     /// RN route for the developer OTA tools page.
     static let developerRoute = "/developer"
+    /// RN route for the Sky screen.
+    static let skyRoute = "/sky"
+    /// RN route for the Spinner screen.
+    static let spinnerRoute = "/spinner"
     /// Message `type` the JS side posts after an OTA update download.
     static let reloadMessageType = "reload"
+}
+
+/// A native host tab. Each tab mounts exactly one RN surface at its route; the
+/// host shell keeps only the active tab's surface alive (see
+/// `HostShellViewController`).
+enum HostTab: Int, CaseIterable {
+    case developer
+    case sky
+    case spinner
+
+    var title: String {
+        switch self {
+        case .developer: return "Developer"
+        case .sky: return "Sky"
+        case .spinner: return "Spinner"
+        }
+    }
+
+    /// RN route this tab mounts, passed as the surface's `initialUrl`.
+    var route: String {
+        switch self {
+        case .developer: return Brownfield.developerRoute
+        case .sky: return Brownfield.skyRoute
+        case .spinner: return Brownfield.spinnerRoute
+        }
+    }
+
+    /// SF Symbol name for the tab bar item.
+    var systemImageName: String {
+        switch self {
+        case .developer: return "wrench.and.screwdriver"
+        case .sky: return "cloud"
+        case .spinner: return "arrow.triangle.2.circlepath"
+        }
+    }
 }
 
 /// A message the React Native brownfield JS bridge can post to the native host.
@@ -43,5 +80,22 @@ enum HostEnvironmentPreference {
     static func set(_ environment: ReactNativeBrownfield.OtaUpdatesEnvironment) {
         let value = environment == .development ? developmentValue : productionValue
         UserDefaults.standard.set(value, forKey: key)
+    }
+}
+
+/// The host's selected tab, persisted to `UserDefaults`.
+///
+/// Stored so the host shell can restore the same surface on scene restoration
+/// and after an OTA reload. Defaults to the Developer tab.
+enum HostTabPreference {
+    private static let key = "OtaHostSelectedTab"
+
+    static var current: HostTab {
+        let stored = UserDefaults.standard.object(forKey: key) as? Int
+        return stored.flatMap(HostTab.init(rawValue:)) ?? .developer
+    }
+
+    static func set(_ tab: HostTab) {
+        UserDefaults.standard.set(tab.rawValue, forKey: key)
     }
 }

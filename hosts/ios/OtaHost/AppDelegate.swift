@@ -14,7 +14,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         // Boot RN + expo-updates and subscribe to the reload bridge before any
-        // RN screen is created (SceneDelegate builds the dev-tools root next).
+        // RN screen is created (SceneDelegate builds the host shell next).
         brownfieldMessageSubscription = BrownfieldBootstrap.start()
         return true
     }
@@ -34,8 +34,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 /// Owns the window; its root is a `UINavigationController` wrapping the native
-/// dev-tools page. RN screens are pushed onto this nav stack (push-only, so the
-/// reloader can rebuild them in place).
+/// host shell (`HostShellViewController`). The shell hosts a single RN surface
+/// at a time in its content slot and provides the navigation context (title +
+/// the Developer tab's Settings action).
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
@@ -47,7 +48,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = UINavigationController(
-            rootViewController: DevToolsViewController()
+            rootViewController: HostShellViewController()
         )
         self.window = window
         window.makeKeyAndVisible()

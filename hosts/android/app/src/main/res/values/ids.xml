@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Stable ids for the RN fragment container and the dev-tools controls.
-         Verification automation taps these; keep them stable. -->
+    <!-- Stable ids for the host shell and the settings controls. Verification
+         automation taps these; keep them stable. -->
     <item name="rn_host_container" type="id" />
+    <item name="host_toolbar" type="id" />
+    <item name="host_bottom_nav" type="id" />
+    <item name="nav_developer" type="id" />
+    <item name="nav_sky" type="id" />
+    <item name="nav_spinner" type="id" />
+    <item name="action_settings" type="id" />
     <item name="radio_env_development" type="id" />
     <item name="radio_env_production" type="id" />
     <item name="switch_use_metro" type="id" />
-    <item name="button_open_rn" type="id" />
-    <item name="button_open_dev_tools" type="id" />
     <item name="button_relaunch" type="id" />
 </resources>

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -28,6 +28,12 @@ interface BrownfieldConfig {
   ios?: { frameworkName?: string };
   android?: { moduleName?: string; packageName?: string };
 }
+
+const HOST_ROUTES = [
+  { path: '/developer', file: 'src/app/(tabs)/developer/index.tsx' },
+  { path: '/sky', file: 'src/app/(tabs)/sky.tsx' },
+  { path: '/spinner', file: 'src/app/(tabs)/spinner.tsx' },
+] as const;
 
 function readAppJson(): {
   version: string;
@@ -73,6 +79,25 @@ describe('native host sources match the plugin coupling constants', () => {
       .join('\n');
   }
 
+  function androidHostSources(): string {
+    const dir = path.join(
+      REPO_ROOT,
+      'hosts',
+      'android',
+      'app',
+      'src',
+      'main',
+      'java',
+      'dev',
+      'otagateway',
+      'host',
+    );
+    return readdirSync(dir)
+      .filter((f) => f.endsWith('.kt'))
+      .map((f) => readFileSync(path.join(dir, f), 'utf8'))
+      .join('\n');
+  }
+
   it('iOS host reads the same Expo.plist keys the plugin writes', () => {
     const sources = iosHostSources();
     // The host's dev-tools reads these keys back; a rename in the plugin that
@@ -95,4 +120,13 @@ describe('native host sources match the plugin coupling constants', () => {
     );
     expect(gradle).toContain(coordinate);
   });
+
+  it.each(HOST_ROUTES)(
+    'both native hosts map $path to an existing RN route',
+    ({ path: routePath, file }) => {
+      expect(iosHostSources()).toContain(`"${routePath}"`);
+      expect(androidHostSources()).toContain(`"${routePath}"`);
+      expect(existsSync(path.join(APP_ROOT, file))).toBe(true);
+    },
+  );
 });

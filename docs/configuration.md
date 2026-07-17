@@ -60,9 +60,9 @@ apps is selected at runtime (below), never by the bake.
 
 ## The runtime host-environment seam
 
-The brownfield host apps have their own environment selector in dev-tools, so the
-app must resolve its gateway from the *live host selection*, not from whatever was
-baked or OTA-cached.
+The brownfield host apps have their own environment selector in native Host
+Settings (opened from the Developer tab), so the app must resolve its gateway
+from the *live host selection*, not from whatever was baked or OTA-cached.
 
 `modules/host-environment` is a small native module. Its native side is written
 by the two config-plugin entry points (`initializeUpdates(environment:)` on iOS,
@@ -105,7 +105,10 @@ Both instances read the **same** `dist/` export. `OTA_ENVIRONMENT` is the only
 difference between them, and flipping it flips both the placeholder host stamped
 into the manifest **and** the derived update id -- which is exactly the seam this
 demo exists to prove. The manifest is read per request, so re-exporting needs no
-server restart.
+server restart. The server leaves the listen host unspecified so Node uses a
+dual-stack socket where available; this is required because iOS Simulator
+resolves `localhost` to `::1`, while Android port reversal and physical-device
+access use IPv4.
 
 ## Runtime gateway resolution for the OTA manifest
 

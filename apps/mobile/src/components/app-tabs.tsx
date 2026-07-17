@@ -9,7 +9,7 @@ const isIOS26OrLater =
   Platform.OS === 'ios' && parseInt(String(Platform.Version), 10) >= 26;
 
 /**
- * Native tab bar. Two tabs: Home (index) and Dev Tools (developer).
+ * Native tab bar. Three tabs: Dev Tools (developer), Sky, and Spinner.
  *
  * When embedded in the native brownfield host the tab bar is hidden -- the
  * native app supplies its own navigation chrome and mounts a single RN screen
@@ -17,16 +17,17 @@ const isIOS26OrLater =
  */
 export default function AppTabs() {
   const colors = Colors.dark;
+  const brownfieldHost = isBrownfieldHost();
 
   return (
     <NativeTabs
-      hidden={isBrownfieldHost()}
+      hidden={brownfieldHost}
       // Android hardware back on a non-initial tab defaults to jumping to the
       // initial tab (backBehavior 'initialRoute'). In the brownfield host that
-      // tab is the hidden, empty Home placeholder, so back would blank the
-      // screen instead of closing the native screen. 'none' lets the back
-      // press bubble out to the native host unhandled.
-      backBehavior={isBrownfieldHost() ? 'none' : 'initialRoute'}
+      // tab is hidden, so back would blank the screen instead of closing the
+      // native screen. 'none' lets the back press bubble out to the native
+      // host unhandled.
+      backBehavior={brownfieldHost ? 'none' : 'initialRoute'}
       backgroundColor={isIOS26OrLater ? undefined : colors.background}
       indicatorColor={colors.backgroundElement}
       iconColor={{
@@ -39,13 +40,17 @@ export default function AppTabs() {
       }}
       rippleColor={colors.backgroundSelected}
       labelVisibilityMode="labeled">
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
-      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="developer">
         <NativeTabs.Trigger.Label>Dev Tools</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="gearshape" md="settings" />
+        {!brownfieldHost && <NativeTabs.Trigger.Icon sf="gearshape" md="settings" />}
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="sky">
+        <NativeTabs.Trigger.Label>Sky</NativeTabs.Trigger.Label>
+        {!brownfieldHost && <NativeTabs.Trigger.Icon sf="cloud.fill" md="cloud" />}
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="spinner">
+        <NativeTabs.Trigger.Label>Spinner</NativeTabs.Trigger.Label>
+        {!brownfieldHost && <NativeTabs.Trigger.Icon sf="fan.fill" md="toys" />}
       </NativeTabs.Trigger>
     </NativeTabs>
   );

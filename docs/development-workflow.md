@@ -88,7 +88,8 @@ first: `pnpm --filter @ota-gateway/mobile start`.
 
 ### Android (runtime toggle -- no framework rebuild)
 
-1. In the host dev-tools screen, enable **"Use Metro dev server"**, then relaunch.
+1. On the Developer tab, open native Settings, enable **"Use Metro dev
+   server"**, then relaunch.
    This inits RN via `ReactNativeDevHostManager` (`useDevSupport = true`).
 2. `adb reverse tcp:8081 tcp:8081`.
 3. Edit JS -> Fast Refresh applies instantly. The toggle persists in prefs;
@@ -176,7 +177,7 @@ The DONE demo -- an actual JS change delivered over the air:
 2. Edit `src/constants/marker.ts` to `OTA marker: v2`, then
    `pnpm --filter @ota-gateway/mobile export`.
 3. In the app: **Check for update** -> true -> **Download** -> **Restart**. The
-   home screen shows `OTA marker: v2`, `isEmbeddedLaunch false`, and a new update
+   Developer shows `OTA marker: v2`, `isEmbeddedLaunch false`, and a new update
    id.
 4. Flip the environment and restart: the other instance serves a **different
    update id** for identical bytes (assets dedupe by content hash, so no
@@ -214,6 +215,13 @@ Each implementation phase is traceable to a doc section; verify against it.
 | Android artifact + host | assembleDebug -> install -> reverses -> Mode B (embedded bundle loads; check/download/restart lands); env toggle + relaunch -> different update id; Mode A (toggle + relaunch + Metro, Fast Refresh works). |
 | iOS packaging + host | xcodegen -> xcodebuild simulator (`CODE_SIGNING_ALLOWED=NO`) -> simctl install/launch -> Mode B OTA flow; repackage Debug -> Mode A. |
 | OTA delivery proof | The marker-bump procedure above, on both platforms. |
+
+For both native hosts, also cycle Developer -> Sky -> Spinner -> Developer and
+confirm each selection replaces the one RN surface with the correct route, the
+RN tab bar stays hidden, no previous route bleeds through, and no surface is
+blank. Android tab changes recreate the host Activity by design; verify Back is
+handled by the visible route and use "Don't keep activities" to exercise
+restoration without duplicate fragments.
 
 ## Related docs
 

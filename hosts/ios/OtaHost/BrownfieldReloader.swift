@@ -8,27 +8,40 @@ struct BrownfieldScreen {
     let title: String?
 }
 
+/// The native surface owner the reloader asks to rebuild the active RN surface.
+///
+/// The host shell owns EXACTLY ONE mounted RN surface at a time (in its content
+/// slot), so the reloader cannot swap it in place the way a navigation stack
+/// allows. Instead the host conforms to this protocol and, on reload, recreates
+/// its active surface (through `BrownfieldReloader.makeViewController`) while
+/// leaving the selected tab and any presented settings untouched.
+protocol BrownfieldReloadHost: AnyObject {
+    /// Recreate the active RN surface after the runtime has restarted. Called on
+    /// the main thread, after `stopReactNative()` / `startReactNative()`.
+    func rebuildActiveSurface()
+}
+
 /// Reloads React Native brownfield screens when the JS side requests it.
 ///
 /// expo-updates' own `reloadAsync()` crashes in a brownfield app because the
 /// native host -- not expo-updates -- owns the RN view lifecycle. So when an OTA
 /// update is downloaded, the JS posts a `{ "type": "reload" }` message instead
-/// of calling `reloadAsync()`, and we rebuild every live RN screen here: tear
-/// down the runtime, start it again, and re-create each currently-presented RN
-/// screen in place so the freshly-downloaded bundle is loaded. This restarts the
-/// RN runtime and rebuilds the tracked RN screens; it does not touch the
-/// `UIWindow` root view controller.
+/// of calling `reloadAsync()`, and we rebuild the live RN surface here: tear
+/// down the runtime, start it again, and ask the host to recreate its currently
+/// mounted surface so the freshly-downloaded bundle is loaded.
 ///
-/// Create RN screens via `makeViewController(...)` so the reloader can rebuild
-/// them. Every live screen is tracked (not just the most recent one) so a reload
-/// never orphans a second RN screen with a dead runtime.
-///
-/// PUSH-ONLY: `performReload()` can only rebuild screens that live in a
-/// `UINavigationController` stack. Do NOT present a tracked RN screen modally or
-/// install one as a tab root until the reloader is extended to rebuild those
-/// presentations too.
+/// The host runs a single mounted surface at a time (`HostShellViewController`).
+/// The reloader weakly tracks every RN view controller it creates
+/// (`makeViewController`) and prunes deallocated ones, so a reload is a no-op
+/// when nothing is on screen and never orphans a surface on a dead runtime. The
+/// actual re-mount is delegated to the registered `BrownfieldReloadHost`, which
+/// preserves the native selected tab and host settings presentation.
 final class BrownfieldReloader {
     static let shared = BrownfieldReloader()
+
+    /// The surface owner rebuilt on reload. Weak -- the host owns the reloader
+    /// relationship, not the reverse.
+    weak var host: BrownfieldReloadHost?
 
     /// Restarts the RN runtime. Injected so tests can substitute it.
     private let restartRuntime: () -> Void
@@ -97,9 +110,9 @@ final class BrownfieldReloader {
         return viewController
     }
 
-    /// Restart the RN runtime and rebuild every live RN screen in place so a
+    /// Restart the RN runtime and rebuild the live RN surface so a
     /// freshly-downloaded OTA update is picked up. Safe to call from any thread;
-    /// no-op if no tracked RN screen is currently in a navigation stack.
+    /// no-op if no tracked RN surface is currently alive.
     func reload() {
         DispatchQueue.main.async { [weak self] in
             self?.performReload()
@@ -113,38 +126,15 @@ final class BrownfieldReloader {
 
         entries.removeAll { $0.viewController == nil }
 
-        // Snapshot the screens that are live in a navigation stack right now,
-        // holding the view controller and its nav controller (not a positional
-        // index, which the runtime restart below could invalidate).
-        let rebuildable = entries.compactMap { entry -> (nav: UINavigationController, viewController: UIViewController, screen: BrownfieldScreen)? in
-            guard let viewController = entry.viewController,
-                  let navigationController = viewController.navigationController,
-                  navigationController.viewControllers.contains(viewController)
-            else {
-                return nil
-            }
-            return (navigationController, viewController, entry.screen)
+        // Only restart when a surface is actually on screen and a host can
+        // rebuild it; otherwise a reload would tear down the runtime with no
+        // surface to bring back.
+        guard let host, entries.contains(where: { $0.viewController != nil }) else {
+            return
         }
-
-        guard !rebuildable.isEmpty else { return }
 
         restartRuntime()
-
-        for item in rebuildable {
-            // Re-resolve the index after the restart rather than trusting a
-            // pre-restart snapshot, in case the stack shifted in between.
-            guard let index = item.nav.viewControllers.firstIndex(of: item.viewController) else {
-                continue
-            }
-            let fresh = makeViewController(
-                moduleName: item.screen.moduleName,
-                initialProperties: item.screen.initialProperties,
-                title: item.screen.title
-            )
-            var stack = item.nav.viewControllers
-            stack[index] = fresh
-            item.nav.setViewControllers(stack, animated: false)
-        }
+        host.rebuildActiveSurface()
 
         entries.removeAll { $0.viewController == nil }
     }

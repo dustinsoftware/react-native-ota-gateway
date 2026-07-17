@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { API_BASE_URL } from '@/api/client';
 import { MatrixRain } from '@/components/matrix-rain';
+import { BUNDLE_MARKER } from '@/constants/marker';
 import { Colors, Spacing } from '@/constants/theme';
 import { getOtaAppVersion } from '@/utils/ota-app-version';
 import { reloadApp } from '@/utils/reload-app';
@@ -56,6 +57,11 @@ export default function DeveloperScreen() {
         <Text style={styles.title}>Developer / OTA</Text>
 
         <View style={styles.card}>
+          {/* OTA delivery proof: the marker changes with each re-exported
+              bundle, so this card alone demonstrates OTA without the Home tab. */}
+          <Text style={styles.marker} testID="bundle-marker">
+            {BUNDLE_MARKER}
+          </Text>
           {rows.map(([label, value]) => (
             <View key={label} style={styles.row}>
               <Text style={styles.rowLabel}>{label}</Text>
@@ -136,6 +142,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: Spacing.three,
     gap: Spacing.two,
+  },
+  marker: {
+    color: Colors.dark.accent,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: Spacing.one,
   },
   row: {
     flexDirection: 'row',

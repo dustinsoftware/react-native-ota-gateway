@@ -58,7 +58,10 @@ serve all of them.
   `reload-app.ts` uses `Updates.reloadAsync()` on this path.
 - **Brownfield artifacts** are built by the packaging pipeline (see
   [brownfield.md](./brownfield.md)). A native host registers the RN module
-  `OtaGatewayApp` and renders any route by passing an `initialUrl` prop.
+  `OtaGatewayApp` and renders any route by passing an `initialUrl` prop. The
+  demo hosts own a three-item native tab bar (Developer, Sky, Spinner) and mount
+  exactly one RN surface at a time. Selecting a native tab replaces that
+  surface with the selected route while the shared RN runtime stays initialized.
 
 The brownfield entry (`src/brownfield/entry.tsx`) is an *addition*: it registers
 `OtaGatewayApp` for the native host while `registerRootComponent` still registers
@@ -90,9 +93,15 @@ change only (pass a different URL); no RN code changes.
    +---------v-----------------------------+   +-------------------v---------------+
    | hosts/android (Kotlin)                |   | hosts/ios (Swift)                 |
    | embeds otagatewaylib AAR              |   | embeds OtaGatewayLib.xcframework  |
-   | dev-tools screen: env toggle, reload  |   | dev-tools screen: env toggle, ... |
+   | native tabs + one RN surface          |   | native tabs + one RN surface      |
    +---------------------------------------+   +-----------------------------------+
 ```
+
+The native tab selection is the navigation state being demonstrated. The RN
+tab bar is hidden in brownfield mode, and the host passes `/developer`, `/sky`,
+or `/spinner` when it creates the one active surface. Route-local RN state is
+discarded on a native tab change. Host-only environment, Metro, and relaunch
+controls live behind the Developer tab's native Settings action.
 
 Both server instances read the **same** `dist/` export. The only difference is
 `OTA_ENVIRONMENT`, which flips (a) the gateway host stamped into the served
@@ -115,7 +124,7 @@ The brownfield RN runs in a host one of two ways. Know which you are in.
 | Platform | Mode A mechanism | Mode B mechanism |
 | --- | --- | --- |
 | **iOS** | **Debug-built framework** -- `./scripts/package-ios.sh --configuration Debug`. expo-updates is disabled in a Debug build, so a `bundleURLOverride` (injected under `#if DEBUG`) points at Metro. **There is no runtime Metro toggle on iOS**: a Release framework's enabled expo-updates owns the bundle URL and always wins, so you switch modes by rebuilding the framework. | Release-built framework; expo-updates enabled; JS from the OTA manifest / embedded bundle. |
-| **Android** | **Runtime toggle** -- a "Use Metro dev server" pref in the host dev-tools screen. When on, the host inits RN via a dev host manager (`useDevSupport = true`); no framework rebuild needed. | Release AAR (or the toggle off); JS from OTA / embedded bundle. |
+| **Android** | **Runtime toggle** -- a "Use Metro dev server" pref in native Host Settings (opened from Developer). When on, the host inits RN via a dev host manager (`useDevSupport = true`); no framework rebuild needed. | Release AAR (or the toggle off); JS from OTA / embedded bundle. |
 
 Why the asymmetry: on iOS an enabled expo-updates controller resolves the bundle
 URL during startup and beats any host-set override, and it can only be Disabled

@@ -2,26 +2,33 @@ import OtaGatewayLib
 import ReactBrownfield
 import UIKit
 
-/// Native developer-tools page. It is the navigation root and the screen a
-/// pushed RN screen returns to. Built programmatically (no storyboard) to keep
-/// the host minimal.
+/// Native host settings, presented modally from the host shell's Developer tab.
 ///
-/// Shows the OTA URL per environment, an environment segmented control
-/// (persisted to `UserDefaults`, "restart required"), and buttons to open RN
-/// screens (through the reloader ONLY) and to reload RN.
+/// Refactored from the former dev-tools root: it keeps the environment
+/// segmented control (persisted to `UserDefaults`, "restart required"), the OTA
+/// endpoint URL for the selected environment, restart-required guidance, and a
+/// manual RN reload action. The old "Open RN route" buttons were removed --
+/// routes are now driven by the host shell's tabs, not ad-hoc buttons.
 ///
-/// expo-updates configuration is fixed for the process lifetime, so the
-/// environment selection only takes effect after a relaunch -- hence the
-/// "restart required" note.
-final class DevToolsViewController: UIViewController {
+/// expo-updates configuration is fixed for the process lifetime, so an
+/// environment change only takes effect after a relaunch -- hence the "restart
+/// required" note. A manual reload restarts the RN runtime and rebuilds the
+/// shell's active surface behind this modal (the modal stays presented).
+final class HostSettingsViewController: UIViewController {
     private let segmentedControl = UISegmentedControl(items: ["development", "production"])
     private let otaUrlLabel = UILabel()
     private let restartLabel = UILabel()
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "OTA Gateway Host"
+        title = "Settings"
         view.backgroundColor = .systemBackground
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done,
+            target: self,
+            action: #selector(dismissSettings)
+        )
+        navigationItem.leftBarButtonItem?.accessibilityIdentifier = "settings-done"
 
         let stack = UIStackView()
         stack.axis = .vertical
@@ -67,22 +74,16 @@ final class DevToolsViewController: UIViewController {
 
         stack.addArrangedSubview(sectionTitle("Actions"))
         stack.addArrangedSubview(actionButton(
-            title: "Open RN /",
-            identifier: "open-rn-home",
-            action: #selector(openHome)
-        ))
-        stack.addArrangedSubview(actionButton(
-            title: "Open RN /developer",
-            identifier: "open-rn-developer",
-            action: #selector(openDeveloper)
-        ))
-        stack.addArrangedSubview(actionButton(
             title: "Reload RN",
             identifier: "reload-rn",
             action: #selector(reloadRN)
         ))
 
         updateOtaUrlLabel()
+    }
+
+    @objc private func dismissSettings() {
+        dismiss(animated: true)
     }
 
     @objc private func environmentChanged() {
@@ -111,25 +112,8 @@ final class DevToolsViewController: UIViewController {
         return url
     }
 
-    // Open RN screens ONLY through the reloader so an OTA reload can rebuild
-    // them in place (an untracked screen would be left on a dead runtime).
-    @objc private func openHome() {
-        pushRoute(Brownfield.homeRoute)
-    }
-
-    @objc private func openDeveloper() {
-        pushRoute(Brownfield.developerRoute)
-    }
-
-    private func pushRoute(_ route: String) {
-        let viewController = BrownfieldReloader.shared.makeViewController(
-            moduleName: Brownfield.moduleName,
-            initialProperties: [Brownfield.initialUrlKey: route],
-            title: route
-        )
-        navigationController?.pushViewController(viewController, animated: true)
-    }
-
+    // Reload restarts the RN runtime and rebuilds the shell's active surface
+    // through the reloader; this modal stays presented.
     @objc private func reloadRN() {
         BrownfieldReloader.shared.reload()
     }

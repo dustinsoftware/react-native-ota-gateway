@@ -67,7 +67,10 @@ export function createApp(options: CreateAppOptions = {}): express.Express {
 // Only listen when run directly (tsx / node); importers get createApp() without
 // opening a socket.
 if (require.main === module) {
-  createApp().listen(PORT, '0.0.0.0', () => {
+  // Let Node bind the unspecified address. On hosts with IPv6 this listens on
+  // `::` with dual-stack support, so iOS Simulator requests to localhost
+  // (which resolve to ::1) and Android/physical-device IPv4 requests both work.
+  createApp().listen(PORT, () => {
     console.log(`[ota-gateway] Server listening on port ${PORT}`);
     console.log(`[ota-gateway] OTA_ENVIRONMENT=${OTA_ENVIRONMENT}`);
   });

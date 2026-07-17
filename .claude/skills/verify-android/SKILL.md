@@ -30,11 +30,10 @@ to switch modes. The toggle defaults **off** and persists in prefs.
 > are separate and verified per the runbook's steps 4/4b in
 > `docs/development-workflow.md`.
 
-> **Two distinct dev-tools controls, don't conflate them:** the **"Use Metro dev
-> server" toggle** selects Mode A vs Mode B (JS source); the **environment
+> **Two distinct Host Settings controls, don't conflate them:** the **"Use Metro
+> dev server" toggle** selects Mode A vs Mode B (JS source); the **environment
 > radio** selects dev vs prod gateway (`:3000` vs `:3001`) and is a Mode B
-> concern. This skill says "toggle" only for the former and "environment radio"
-> for the latter.
+> concern. Open both from the Developer tab's native Settings action.
 
 ## Preconditions (both modes)
 
@@ -73,13 +72,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Toggle **off** (the default). Metro need not run.
 
-1. Launch the host; open an RN screen from the dev-tools page.
-2. **Pass criteria:** the embedded bundle loads; home screen shows the current
-   `OTA marker` and an update id.
+1. Launch the host on the Developer native tab.
+2. **Pass criteria:** the embedded bundle loads; Developer shows the current
+   `OTA marker` and an update id; the RN tab bar is hidden.
 3. OTA flow: **Check for update** -> **Download** -> **Restart** (the brownfield
    reload relaunches the RN root; no process kill).
-4. Flip the **environment radio** in dev-tools + relaunch -> a **different update
-   id** for identical bytes (the per-environment id seam).
+4. Open native Settings, flip the **environment radio**, and relaunch -> a
+   **different update id** for identical bytes (the per-environment id seam).
 
 ### OTA delivery proof (the DONE demo)
 
@@ -91,7 +90,7 @@ the transition.
 2. Edit `apps/mobile/src/constants/marker.ts` to `v2`, re-run
    `pnpm --filter @ota-gateway/mobile export`.
 3. In-app: **Check** -> true -> **Download** -> **Restart**.
-4. Home screen shows `OTA marker: v2`, `isEmbeddedLaunch false`, new id.
+4. Developer shows `OTA marker: v2`, `isEmbeddedLaunch false`, new id.
 5. Flip the environment radio + relaunch: different id, identical bytes
    (content-hash dedupe -> no re-download).
 
@@ -101,7 +100,7 @@ the transition.
 ## Mode A -- local hot reload (no rebuild)
 
 1. Start Metro (own terminal): `pnpm --filter @ota-gateway/mobile start`.
-2. In the host dev-tools screen, enable **"Use Metro dev server"**, then
+2. On Developer, open native Settings, enable **"Use Metro dev server"**, then
    **relaunch** the app (inits RN with `useDevSupport = true`).
 3. `adb reverse tcp:8081 tcp:8081` (and `:3000`/`:3001` if the JS hits the servers).
 4. **Pass criteria:** edit any JS under `apps/mobile/src` -> Fast Refresh applies
@@ -132,10 +131,14 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
   across reinstalls; uninstall to reset.
 - A stray Metro on `:8081` from another checkout feeds the wrong bundle.
 - Relaunching between v1 capture and Restart silently self-applies the update.
+- Cycle Developer -> Sky -> Spinner -> Developer. Each tap recreates the host
+  Activity intentionally so Callstack's Activity-scoped Back callback and the
+  prior RN root are destroyed. Confirm the selected route renders, the RN tab
+  bar stays hidden, and hardware Back never targets a previous tab.
 
 ## Related
 
 - `docs/development-workflow.md` -- Mode A/B, runbook, OTA proof (canonical).
-- `docs/brownfield.md` -- `ReactNativeDevHostManager`, reload handler, dev-tools.
+- `docs/brownfield.md` -- native tab shell, Host Settings, reload handler.
 - `docs/architecture.md` -- Mode A/B matrix and topology.
 - iOS equivalent: the `verify-ios` skill.

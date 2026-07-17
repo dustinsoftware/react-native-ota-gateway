@@ -13,23 +13,25 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
+import androidx.appcompat.widget.Toolbar
 import dev.otagateway.OtaUpdatesEnvironment
 import kotlin.system.exitProcess
 
 /**
- * Native developer-tools page. It is the launcher activity and the root the
- * hardware-back returns to from an RN screen. Built programmatically (no
- * Compose, no XML layout) to keep the host minimal.
+ * Native settings / developer-tools screen, opened from the host shell's
+ * ([RNHostActivity]) toolbar Settings action (shown on the Developer tab).
  *
  * Shows the OTA URL per environment, an environment radio (persisted to prefs,
  * "restart required"), a "Use Metro dev server" switch (Mode A, "restart
- * required"), and buttons to open RN screens and relaunch the app.
+ * required"), and a Relaunch button. Built programmatically (no Compose, no XML
+ * layout) to keep the host minimal.
  *
  * expo-updates configuration is fixed for the process lifetime, so the env and
  * Metro selections only take effect after a relaunch -- hence "restart
- * required" and the Relaunch button.
+ * required" and the Relaunch button. Relaunch restarts the process; the host
+ * shell restores the previously selected native tab from [HostRoutePrefs].
  */
-class MainActivity : AppCompatActivity() {
+class HostSettingsActivity : AppCompatActivity() {
 
     // OTA endpoints per environment, matching the AAR's OtaUpdatesEnvironment
     // enum (its updateUrl is internal to the AAR module, so it is mirrored here
@@ -44,13 +46,17 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val root = LinearLayout(this).apply {
+        val toolbar = Toolbar(this).apply {
+            title = getString(R.string.settings_title)
+        }
+
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
         }
 
-        root.addView(header("OTA Gateway Host"))
-        root.addView(
+        content.addView(header("OTA Gateway Host"))
+        content.addView(
             body(
                 "Native dev-tools. Mode B (default) loads JS from OTA/embedded; " +
                     "Mode A loads from Metro. expo-updates config is fixed per " +
@@ -58,32 +64,18 @@ class MainActivity : AppCompatActivity() {
             ),
         )
 
-        root.addView(sectionTitle("OTA endpoints"))
-        root.addView(body("development: ${otaUrls[OtaUpdatesEnvironment.DEVELOPMENT]}"))
-        root.addView(body("production: ${otaUrls[OtaUpdatesEnvironment.PRODUCTION]}"))
+        content.addView(sectionTitle("OTA endpoints"))
+        content.addView(body("development: ${otaUrls[OtaUpdatesEnvironment.DEVELOPMENT]}"))
+        content.addView(body("production: ${otaUrls[OtaUpdatesEnvironment.PRODUCTION]}"))
 
-        root.addView(sectionTitle("Environment (restart required)"))
-        root.addView(buildEnvRadioGroup())
+        content.addView(sectionTitle("Environment (restart required)"))
+        content.addView(buildEnvRadioGroup())
 
-        root.addView(sectionTitle("Metro dev server (restart required)"))
-        root.addView(buildMetroSwitch())
+        content.addView(sectionTitle("Metro dev server (restart required)"))
+        content.addView(buildMetroSwitch())
 
-        root.addView(sectionTitle("Actions"))
-        root.addView(
-            actionButton(
-                id = R.id.button_open_rn,
-                label = "Open RN screen",
-                description = "Open RN screen",
-            ) { openRoute("/") },
-        )
-        root.addView(
-            actionButton(
-                id = R.id.button_open_dev_tools,
-                label = "Open RN dev tools",
-                description = "Open RN dev tools",
-            ) { openRoute("/developer") },
-        )
-        root.addView(
+        content.addView(sectionTitle("Actions"))
+        content.addView(
             actionButton(
                 id = R.id.button_relaunch,
                 label = "Relaunch app",
@@ -91,8 +83,21 @@ class MainActivity : AppCompatActivity() {
             ) { relaunch() },
         )
 
-        val scroll = ScrollView(this).apply { addView(root) }
-        setContentView(scroll)
+        val scroll = ScrollView(this).apply {
+            addView(content)
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f)
+        }
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+            addView(toolbar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(scroll)
+        }
+        setContentView(root)
+        setSupportActionBar(toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        toolbar.setNavigationOnClickListener { finish() }
     }
 
     private fun buildEnvRadioGroup(): RadioGroup {
@@ -100,7 +105,7 @@ class MainActivity : AppCompatActivity() {
         return RadioGroup(this).apply {
             orientation = RadioGroup.VERTICAL
             addView(
-                RadioButton(this@MainActivity).apply {
+                RadioButton(this@HostSettingsActivity).apply {
                     id = R.id.radio_env_development
                     text = "development (:3000)"
                     contentDescription = "Environment development"
@@ -108,7 +113,7 @@ class MainActivity : AppCompatActivity() {
                 },
             )
             addView(
-                RadioButton(this@MainActivity).apply {
+                RadioButton(this@HostSettingsActivity).apply {
                     id = R.id.radio_env_production
                     text = "production (:3001)"
                     contentDescription = "Environment production"
@@ -121,7 +126,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     OtaUpdatesEnvironment.PRODUCTION
                 }
-                DebugPrefs.setEnvironment(this@MainActivity, env)
+                DebugPrefs.setEnvironment(this@HostSettingsActivity, env)
             }
         }
     }
@@ -131,22 +136,17 @@ class MainActivity : AppCompatActivity() {
             id = R.id.switch_use_metro
             text = "Use Metro dev server"
             contentDescription = "Use Metro dev server"
-            isChecked = DebugPrefs.useMetro(this@MainActivity)
+            isChecked = DebugPrefs.useMetro(this@HostSettingsActivity)
             setOnCheckedChangeListener { _, checked ->
-                DebugPrefs.setUseMetro(this@MainActivity, checked)
+                DebugPrefs.setUseMetro(this@HostSettingsActivity, checked)
             }
         }
-
-    private fun openRoute(route: String) {
-        startActivity(
-            Intent(this, RNHostActivity::class.java).putExtra(RNHostActivity.EXTRA_ROUTE, route),
-        )
-    }
 
     /**
      * Fully restarts the process so a new environment / Metro selection is
      * picked up. finishAffinity() tears down the task; exitProcess ends the
-     * process (Android relaunches the last activity of a killed foreground task).
+     * process (Android relaunches the last activity of a killed foreground
+     * task). The host shell restores the selected tab from [HostRoutePrefs].
      */
     private fun relaunch() {
         val intent = packageManager.getLaunchIntentForPackage(packageName)

@@ -18,8 +18,11 @@ targets from the same source:
   host app embeds to render RN screens inside an existing native app.
 
 Two minimal native host apps (`hosts/ios`, `hosts/android`) embed the brownfield
-artifacts and expose a single developer-tools screen (OTA URL, environment
-toggle, reload buttons, open-RN buttons) so you can watch an OTA update land.
+artifacts and own a three-item native tab bar (Developer, Sky, Spinner). Each
+host keeps one RN surface mounted at a time and passes the selected route as
+`initialUrl`, demonstrating that the host owns navigation state. Host-only OTA
+environment and Metro controls live behind the Developer tab's native Settings
+action.
 
 The demo backend is the app's own server run twice: a **dev** instance on
 `http://localhost:3000` and a **prod** instance on `http://localhost:3001`. The
@@ -87,5 +90,5 @@ brownfield host integration in both Mode A and Mode B, on the iOS simulator and
 the Android emulator. Docs were written first (target design) and reconciled
 against the code in a closing audit; any deviation found while implementing was
 folded back into the corresponding doc in the same change. One known intermittent
-issue is tracked in [docs/brownfield.md](./docs/brownfield.md) (iOS second-surface
-blank).
+issue is tracked in [docs/brownfield.md](./docs/brownfield.md) (iOS later-mount
+blank, retained for repeated tab-cycle verification).

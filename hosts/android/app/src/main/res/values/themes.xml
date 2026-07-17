@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Plain AppCompat theme; the host UI is built programmatically. -->
-    <style name="Theme.OtaHost" parent="Theme.AppCompat.DayNight.NoActionBar" />
+    <!-- Material bridge theme: keeps the existing AppCompat behaviour while
+         satisfying Material Components (required by BottomNavigationView in the
+         host shell). The host UI is otherwise built programmatically. -->
+    <style name="Theme.OtaHost" parent="Theme.MaterialComponents.DayNight.NoActionBar.Bridge" />
 </resources>

@@ -192,11 +192,11 @@ match on both sides.
 
 ## Proving delivery
 
-The home screen renders a `BUNDLE_MARKER` constant (`src/constants/marker.ts`,
-initially `OTA marker: v1`) plus the current update id and
-`isEmbeddedLaunch`. The delivery proof (bump the marker, re-export, Check ->
-Download -> Restart, watch it change to `v2` with `isEmbeddedLaunch false` and a
-new update id) is the DONE demo; the exact steps are in
+The Developer screen renders a `BUNDLE_MARKER` constant
+(`src/constants/marker.ts`, initially `OTA marker: v1`) alongside the current
+update id and `isEmbeddedLaunch`. The delivery proof (bump the marker,
+re-export, Check -> Download -> Restart, watch it change to `v2` with
+`isEmbeddedLaunch false` and a new update id) is the DONE demo; the exact steps are in
 [development-workflow.md](./development-workflow.md).
 
 ## Related docs

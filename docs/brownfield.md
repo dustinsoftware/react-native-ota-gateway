@@ -231,8 +231,8 @@ Framework paths are relative into the `apps/mobile` iOS build output
 ### Bootstrap order
 
 `AppDelegate` / `SceneDelegate` set a `UINavigationController` whose root is
-`DevToolsViewController`, and run the bootstrap on launch. `BrownfieldBootstrap.swift`
-does, in this order:
+`HostShellViewController`, and run the bootstrap on launch.
+`BrownfieldBootstrap.swift` does, in this order:
 
 ```
 1  ReactNativeBrownfield.shared.bundle = ReactNativeBundle
@@ -248,23 +248,29 @@ does, in this order:
 subscription token** (store it on the delegate); if it is deallocated the reload
 message is dropped.
 
-### `BrownfieldReloader.swift` (push-only)
+### Native tabs and `BrownfieldReloader.swift`
 
-The reloader tracks every RN view controller it creates (`makeViewController`)
-and, on reload, stops and restarts RN and rebuilds the tracked VCs in place
-within their navigation stacks. It is **push-only**: it never pops or presents on
-its own -- it rebuilds what is already on screen. `Updates.reloadAsync()` is never
-called from the host (it crashes in brownfield); the JS side posts
-`{ type: 'reload' }` and the host rebuilds the root, so an OTA update applies
-without leaving a screen attached to a stopped RN runtime.
+`HostShellViewController.swift` owns a native `UITabBar` with Developer, Sky,
+and Spinner items plus one content slot. It does **not** use
+`UITabBarController`, because retaining one RN controller per item would create
+multiple simultaneous Expo Router roots in the shared JS runtime. A tab
+selection first removes the current `ReactNativeViewController`, then creates a
+new tracked controller through `BrownfieldReloader` with `/developer`, `/sky`,
+or `/spinner` as `initialUrl`.
 
-### Dev-tools screen
+The reloader tracks the one live RN controller weakly. On reload it stops and
+restarts RN, then asks the host shell to recreate the currently selected route.
+The native shell, selected tab, and presented settings controller remain in
+place. `Updates.reloadAsync()` is never called from the host (it crashes in
+brownfield); the JS side posts `{ type: 'reload' }`.
 
-`DevToolsViewController.swift`: an environment segmented control (persists to
-`UserDefaults`, labeled "restart required"), the OTA URLs read from `Expo.plist`
-per environment, "Open RN `/`" and "Open RN `/developer`" buttons that create
-screens **through the reloader only**, and a "Reload RN" button. `Brownfield.swift`
-holds the constants.
+### Host Settings
+
+The Developer tab shows a native Settings action.
+`HostSettingsViewController.swift` contains the environment segmented control
+(persisted to `UserDefaults`, labeled "restart required"), OTA URL for the
+selected environment, and manual RN reload. Routes are selected only by the
+native tab bar; the old "Open RN" buttons no longer exist.
 
 ### ATS
 
@@ -395,20 +401,32 @@ Subscribes to `onMessage`; on `type == "reload"` calls
 `android.util.Log` -- no Timber dependency in the demo.) Android needs no
 `BrownfieldReloader` equivalent: relaunching the RN root here is enough.
 
-### `MainActivity.kt` (dev-tools page)
+### `RNHostActivity.kt` (launcher and native tab shell)
 
-Shows: the OTA URL per environment, an environment radio (persisted to prefs,
-"restart required"), the "Use Metro dev server" toggle, "Open RN screen" (`/`),
-"Open RN dev tools" (`/developer`), and "Relaunch app".
-
-### `RNHostActivity.kt`
+`RNHostActivity` owns a native Material `BottomNavigationView` with Developer,
+Sky, and Spinner items, a toolbar, and one fragment container. It creates one
+`ReactNativeFragment` with the selected route:
 
 ```kotlin
 ReactNativeFragment.createReactNativeFragment(
     "OtaGatewayApp",
-    bundleOf("initialUrl" to route),
+    bundleOf("initialUrl" to selectedRoute.path),
 )
 ```
+
+Callstack's `createView` registers an Activity-scoped Back callback without a
+Fragment lifecycle owner. Replacing several fragments inside one Activity would
+leave callbacks from removed surfaces registered. A tab selection therefore
+persists the route, removes the current fragment, and recreates the Activity.
+The old callback and RN root die with the old Activity before the new route
+mounts. `HostRoutePrefs` restores the selected tab after tab changes, OTA
+relaunch, or process death.
+
+### `HostSettingsActivity.kt`
+
+The Developer toolbar action opens native Host Settings: OTA URLs, environment
+radio, "Use Metro dev server" toggle, and Relaunch. The former native-only
+`MainActivity` and its route-opening buttons were removed.
 
 ### Cleartext networking
 
@@ -457,9 +475,9 @@ not just physical devices. See [development-workflow.md](./development-workflow.
   `http://localhost` fail silently.
 - **`backBehavior="none"`.** The brownfield tab layout (`app-tabs.tsx`) sets
   `backBehavior={isBrownfieldHost() ? 'none' : 'initialRoute'}`. Under a host the
-  tab bar is hidden; with the Android default (`initialRoute`) a hardware back
-  press jumps to the hidden empty Home tab and blanks the screen. With `'none'`
-  the press bubbles out and the native screen closes correctly.
+  RN tab bar is hidden; with the Android default (`initialRoute`) a hardware
+  back press can jump within that hidden navigator instead of bubbling to the
+  native host. With `'none'` the visible RN route delegates Back to the host.
 - **`freshRouteContext` route-bleed fix (identity-fragile).**
   `src/brownfield/runtime.ts` wraps the require-context in a *new identity* per
   mount. expo-router's module-global store restores the previous navigation state
@@ -467,19 +485,14 @@ not just physical devices. See [development-workflow.md](./development-workflow.
   native screen renders the previous screen's route instead of its own
   `initialUrl`. This depends on expo-router internals -- keep the warning comment,
   keep versions pinned, and re-verify on any expo-router bump.
-- **iOS second-surface intermittent blank (known issue, not fixed).** Opening the
-  `/developer` RN surface as the **second** pushed surface (Home pushed first) has
-  intermittently come up blank; the **first** surface pushed in a session is
-  reliable. It reproduces only sometimes and only on a second surface -- the same
-  shape as the Android route-bleed the `freshRouteContext` fix (above) addresses,
-  where expo-router's module-global store restores prior navigation state when a
-  context mounts a second time. The suspected area is therefore that same
-  store-restore fragility in `src/brownfield/runtime.ts`, surfacing on iOS along
-  the push-only reloader path (`BrownfieldReloader` rebuilds tracked VCs in place),
-  not yet root-caused. Deliberately not fixed here -- documented so a future
-  expo-router bump re-checks it alongside the `freshRouteContext` note above.
-  Observed workaround: reopen the surface (the reloader rebuilds it), or open
-  `/developer` first.
+- **iOS later-mount intermittent blank (known issue, not yet closed).** Before
+  native tabs, opening `/developer` as the second pushed RN surface sometimes
+  produced a blank screen. The host now permits only one mounted RN surface at
+  a time, but tab switching still creates a later surface in the same shared
+  runtime. Re-run repeated Developer -> Sky -> Spinner -> Developer cycles
+  before treating the old symptom as resolved. Never retain concurrent Expo
+  Router roots in this host; keep the `freshRouteContext` warning above and
+  re-verify both issues on any expo-router bump.
 
 ## Related docs
 

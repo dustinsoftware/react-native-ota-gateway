@@ -70,7 +70,8 @@ in by `package-ios.sh`. `-derivedDataPath build` pins the `.app` output path so
 
 **Pass criteria:**
 - App boots and renders the RN screen inside the native host.
-- Home screen shows the current `OTA marker` and an update id.
+- Developer shows the current `OTA marker` and an update id.
+- The native Developer/Sky/Spinner tab bar is visible; the RN tab bar is hidden.
 - Manifest curl returns `200 multipart/mixed` and the `:3000` vs `:3001` ids
   differ for identical bytes (see below).
 
@@ -85,10 +86,10 @@ never see the transition.
    `pnpm --filter @ota-gateway/mobile export`.
 3. In-app: **Check for update** -> true -> **Download** -> **Restart** (the
    brownfield bridge reload, not a process relaunch).
-4. Home screen now shows `OTA marker: v2`, `isEmbeddedLaunch false`, and a new id.
-5. Flip the environment (the segmented control on the dev-tools screen) and
-   relaunch: the other instance serves a **different update id** for identical
-   bytes (assets dedupe by content hash -> no re-download).
+4. Developer now shows `OTA marker: v2`, `isEmbeddedLaunch false`, and a new id.
+5. Open native Settings from Developer, flip the environment, and relaunch: the
+   other instance serves a **different update id** for identical bytes (assets
+   dedupe by content hash -> no re-download).
 
 > Update ids are not stable across exports of identical source (Hermes bytecode
 > isn't byte-identical build to build). Record ids from the export you are
@@ -139,16 +140,16 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
 - A stray Metro on `:8081` from another checkout feeds the wrong bundle -- check
   `lsof` first.
 - Relaunching between v1 capture and Restart silently self-applies the update.
-- Opening the `/developer` RN screen as the **second** pushed surface can
-  intermittently come up blank (known, not fixed -- see `docs/brownfield.md`).
-  This is not a host failure: reopen the surface (the reloader rebuilds it), or
-  open `/developer` first.
+- Cycle Developer -> Sky -> Spinner -> Developer repeatedly. The shell mounts
+  one RN surface at a time, but a historical later-mount blank is still tracked
+  in `docs/brownfield.md`; do not consider the tab flow verified if any route is
+  blank or restores the previous route.
 - `simctl install booted` fails if no simulator is booted -- boot one first
   (`xcrun simctl boot ...; open -a Simulator`).
 
 ## Related
 
 - `docs/development-workflow.md` -- Mode A/B, runbook, OTA proof (canonical).
-- `docs/brownfield.md` -- iOS packaging, reloader, dev-tools screen.
+- `docs/brownfield.md` -- iOS packaging, native tab shell, reloader, Host Settings.
 - `docs/architecture.md` -- Mode A/B matrix and topology.
 - Android equivalent: the `verify-android` skill.
