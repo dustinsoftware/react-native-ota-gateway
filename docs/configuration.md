@@ -98,7 +98,7 @@ The demo backend (`apps/mobile/server`) reads exactly two:
 
 | Variable | Purpose |
 | --- | --- |
-| `PORT` | Which port the instance listens on. `server:dev` sets `3000`, `server:prod` sets `3001`. |
+| `PORT` | Which port the instance listens on. `server:dev` sets `3000`, `server:prod` sets `3001`; the Docker `gateway-dev`/`gateway-prod` services (the required Mode B serving) set the same values in `docker-compose.yml`. |
 | `OTA_ENVIRONMENT` | Which gateway host the manifest route advertises, and which per-environment update id it derives. `production` -> prod host; anything else -> dev (strict `=== 'production'`). `server:prod` sets `production`; `server:dev` leaves it unset/`development`. |
 
 Both instances read the **same** `dist/` export. `OTA_ENVIRONMENT` is the only

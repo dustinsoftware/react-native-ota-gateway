@@ -10,7 +10,11 @@ Step-by-step verification of the iOS brownfield host. The canonical source is
 `docs/brownfield.md` (iOS packaging); this skill is the operational checklist.
 If a step here ever conflicts with those docs, the docs win -- and update them.
 
-iOS is **simulator-only** in this repo (`CODE_SIGNING_ALLOWED=NO`).
+iOS is **simulator-only** in this repo, ad-hoc signed (identity `-`; no
+certificates needed). **Never pass `CODE_SIGNING_ALLOWED=NO` to xcodebuild** --
+it overrides the project's ad-hoc signing, strips the keychain entitlements,
+and silently breaks SecureStore persistence (the OTA gate then treats every
+launch as stale; see docs/brownfield.md).
 
 > **Scope:** this skill verifies the **brownfield host**. The standalone web
 > (`:3000` in a browser) and standalone native (`npx expo run:ios`) targets are
@@ -38,7 +42,11 @@ by flipping a setting (this is the key iOS-vs-Android difference).
 3. `pnpm --filter @ota-gateway/mobile export` -- exports all platforms and
    regenerates the OTA manifest. **Never run `npx expo export` directly** (Metro
    never exits and it hangs).
-4. Servers up: `pnpm server:dev & pnpm server:prod` (`:3000` dev / `:3001` prod).
+4. Gateway containers up: `docker compose up --build -d` (`gateway-dev` :3000 /
+   `gateway-prod` :3001). **Mode B is served ONLY from these Docker
+   containers** -- never from host-run `pnpm server:*` (those are for
+   standalone-web iteration). The images bake `dist/`, so re-run with
+   `--build` after every export. Mode A always uses the Expo/Metro dev server.
 5. Tooling present: `xcodegen`, Xcode CLT, `ccache` (`brew install xcodegen ccache`).
    The first `package-ios.sh` builds RN from source -- **cold builds run 30-60+
    min**; ~2-6 min with a warm ccache. It is not hung; let it finish.
@@ -58,7 +66,7 @@ cd apps/mobile && ./scripts/package-ios.sh                 # Release framework (
 cd ../../hosts/ios && xcodegen                             # generate .xcodeproj from project.yml
 xcodebuild -project OtaHost.xcodeproj -scheme OtaHost \
   -sdk iphonesimulator -configuration Release \
-  -derivedDataPath build CODE_SIGNING_ALLOWED=NO build     # host app; framework is embedded at build time
+  -derivedDataPath build build                             # host app; framework is embedded at build time
 xcrun simctl install booted build/Build/Products/Release-iphonesimulator/OtaHost.app
 xcrun simctl launch booted dev.otagateway.host
 ```
@@ -83,7 +91,9 @@ never see the transition.
 
 1. With a fresh launch, note `OTA marker: v1` and the update id.
 2. Edit `apps/mobile/src/constants/marker.ts` to `v2`, then re-run
-   `pnpm --filter @ota-gateway/mobile export`.
+   `pnpm --filter @ota-gateway/mobile export` and
+   `docker compose up --build -d` (containers bake `dist/`; rebuild to serve
+   the new export).
 3. In-app: **Check for update** -> true -> **Download** -> **Restart** (the
    brownfield bridge reload, not a process relaunch).
 4. Developer now shows `OTA marker: v2`, `isEmbeddedLaunch false`, and a new id.
@@ -104,7 +114,7 @@ pnpm --filter @ota-gateway/mobile start                          # Metro on :808
 cd apps/mobile && ./scripts/package-ios.sh --configuration Debug # disables expo-updates; installs #if DEBUG bundleURLOverride -> :8081
 cd ../../hosts/ios && xcodegen \
   && xcodebuild -project OtaHost.xcodeproj -scheme OtaHost -sdk iphonesimulator \
-       -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO build  # rebuild host against Debug framework
+       -configuration Release -derivedDataPath build build  # rebuild host against Debug framework
 xcrun simctl install booted build/Build/Products/Release-iphonesimulator/OtaHost.app \
   && xcrun simctl launch booted dev.otagateway.host
 ```

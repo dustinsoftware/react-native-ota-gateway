@@ -213,7 +213,15 @@ version is detected correctly (`0.83.6`) and the redundant load is skipped.
 ## Host integration recipe -- iOS
 
 The host is `hosts/ios`, an XcodeGen project (`project.yml` checked in, the
-`.xcodeproj` gitignored), simulator-only (`CODE_SIGNING_ALLOWED=NO`). Target name
+`.xcodeproj` gitignored), simulator-only, **ad-hoc signed** (identity `-`, with
+`OtaHost/OtaHost.entitlements`). Ad-hoc signing costs nothing (no certificates
+or team) but, unlike a fully unsigned `CODE_SIGNING_ALLOWED=NO` build, embeds
+the keychain entitlements that expo-secure-store needs even on the simulator --
+an unsigned host fails every `SecItemAdd`/`SecItemCopyMatching` with
+`errSecMissingEntitlement`, so the OTA staleness timestamp
+(`src/utils/ota-timestamp.ts`) silently never persists and the OTA gate treats
+every launch as stale. Never pass `CODE_SIGNING_ALLOWED=NO` on the xcodebuild
+command line; it overrides the project settings and re-breaks this. Target name
 `OtaHost`.
 
 ### `project.yml` framework rules (load-bearing)
@@ -263,6 +271,29 @@ restarts RN, then asks the host shell to recreate the currently selected route.
 The native shell, selected tab, and presented settings controller remain in
 place. `Updates.reloadAsync()` is never called from the host (it crashes in
 brownfield); the JS side posts `{ type: 'reload' }`.
+
+> **Known issue (open; identical to the eng-regal-hybrid-app / eng-ios
+> integration on purpose).** On iOS, the in-place Restart after a manual
+> Check/Download does NOT boot the freshly-downloaded update: the restarted
+> runtime reloads the previously-launched bundle, and only a full process
+> relaunch applies the update. Root cause: `fetchUpdateAsync` only writes the
+> updates database -- the live launcher is advanced exclusively by an
+> expo-updates `RelaunchProcedure` (what `reloadAsync()` runs internally,
+> unusable in brownfield), and the brownfield stop/start path never runs one.
+> Verified here end-to-end with the bundle marker (Restart -> old marker +
+> old update id; process relaunch -> new marker + new id) and confirmed by
+> the same symptom on eng-ios. A working fix exists (see the reverted
+> prototype: `requestRelaunch` between `stopReactNative()` and
+> `startReactNative()`, plus a release `bundleURLOverride` resolving
+> `AppController.launchAssetUrl()`); it is intentionally not applied while
+> this repo serves as the 1:1 repro of the production integration.
+>
+> Historical footnote: when the host was built UNSIGNED
+> (`CODE_SIGNING_ALLOWED=NO`), broken SecureStore persistence made the OTA
+> gate treat every launch as stale, which amplified this staleness bug into
+> an infinite reload loop (~12Hz runtime churn, blank surface, process
+> death). Ad-hoc signing fixed the persistence; the staleness bug above
+> remains.
 
 ### Host Settings
 

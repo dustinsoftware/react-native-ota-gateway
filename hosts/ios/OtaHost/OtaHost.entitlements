@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Keychain access for expo-secure-store (the OTA staleness timestamp,
+	     src/utils/ota-timestamp.ts). A completely unsigned binary
+	     (CODE_SIGNING_ALLOWED=NO) has no entitlements at all, so SecItemAdd /
+	     SecItemCopyMatching fail with errSecMissingEntitlement and SecureStore
+	     silently never persists -- which makes the OTA gate treat every launch
+	     as stale. The host therefore builds ad-hoc signed (identity "-") with
+	     this file; no certificates or team are required for the simulator. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)dev.otagateway.host</string>
+	</array>
+	<key>application-identifier</key>
+	<string>$(AppIdentifierPrefix)dev.otagateway.host</string>
+</dict>
+</plist>

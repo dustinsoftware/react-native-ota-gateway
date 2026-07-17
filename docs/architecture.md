@@ -11,6 +11,7 @@ native host apps.
 react-native-ota-gateway/
 |- pnpm-workspace.yaml        # workspaces apps/*, packages/*; nodeLinker: hoisted (RN autolinking)
 |- package.json               # root orchestration scripts (export, server:dev, server:prod, ...)
+|- docker-compose.yml         # standalone gateway containers -- REQUIRED serving for Mode B (dev :3000, prod :3001)
 |- README.md, .gitignore      # ignores generated ios/, android/, dist/, hosts/ios/*.xcodeproj
 |- docs/                      # canonical reference (this folder)
 |- apps/

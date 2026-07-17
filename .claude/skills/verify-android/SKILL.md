@@ -41,7 +41,11 @@ to switch modes. The toggle defaults **off** and persists in prefs.
 2. `pnpm typecheck && pnpm test` -- the CI gate; must be green first.
 3. `pnpm --filter @ota-gateway/mobile export` -- exports all platforms + manifest.
    **Never run `npx expo export` directly** (Metro never exits -> hangs).
-4. Servers up: `pnpm server:dev & pnpm server:prod` (`:3000` dev / `:3001` prod).
+4. Gateway containers up: `docker compose up --build -d` (`gateway-dev` :3000 /
+   `gateway-prod` :3001). **Mode B is served ONLY from these Docker
+   containers** -- never from host-run `pnpm server:*` (those are for
+   standalone-web iteration). The images bake `dist/`, so re-run with
+   `--build` after every export. Mode A always uses the Expo/Metro dev server.
 5. Tooling: JDK 17, Android SDK (compileSdk 36, an emulator), Gradle 8.14.4
    (wrapper), minSdk 24. Have an emulator **running** (or a device connected)
    before the `adb` / install steps (`adb devices` should list one).
@@ -88,7 +92,9 @@ the transition.
 
 1. Fresh launch: note `OTA marker: v1` and the update id.
 2. Edit `apps/mobile/src/constants/marker.ts` to `v2`, re-run
-   `pnpm --filter @ota-gateway/mobile export`.
+   `pnpm --filter @ota-gateway/mobile export` and
+   `docker compose up --build -d` (containers bake `dist/`; rebuild to serve
+   the new export).
 3. In-app: **Check** -> true -> **Download** -> **Restart**.
 4. Developer shows `OTA marker: v2`, `isEmbeddedLaunch false`, new id.
 5. Flip the environment radio + relaunch: different id, identical bytes

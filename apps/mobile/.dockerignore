@@ -1,0 +1,7 @@
+# The image only needs server/ and dist/ (see Dockerfile). Exclude everything
+# else so the build context stays small -- node_modules and ios/.brownfield in
+# particular are hundreds of MB.
+*
+!server
+!dist
+server/__tests__

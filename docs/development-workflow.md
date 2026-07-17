@@ -11,7 +11,7 @@ root with `pnpm`; native builds run from the host directories.
 | pnpm | Workspace package manager | `nodeLinker: hoisted` in `pnpm-workspace.yaml` (RN autolinking needs a hoisted layout). |
 | ccache | Caches C/C++/ObjC across iOS builds | RN builds from source; cold builds are slow. `brew install ccache`. |
 | XcodeGen | Generates the iOS host `.xcodeproj` from `project.yml` | `brew install xcodegen`. iOS host is simulator-only. |
-| Xcode + command-line tools | iOS packaging + host build | Simulator only; `CODE_SIGNING_ALLOWED=NO`. |
+| Xcode + command-line tools | iOS packaging + host build | Simulator only; ad-hoc signed (identity `-`, no certificates needed). Do **not** pass `CODE_SIGNING_ALLOWED=NO` -- an unsigned host breaks keychain/SecureStore (see [brownfield.md](./brownfield.md)). |
 | JDK 17 | Android build | The host mirrors the generated project's toolchain. |
 | Android SDK (compileSdk 36, an emulator) | Android host build + run | Gradle 8.14.4, minSdk 24. |
 
@@ -24,7 +24,9 @@ root with `pnpm`; native builds run from the host directories.
   `npx expo export` directly** -- Metro never exits after bundling, so it hangs;
   `export-web.mjs` watches for the completion marker and kills the process.
 - `pnpm server:dev` -- run the server with `PORT=3000`, development.
+  **Standalone-web iteration only; never for Mode B** (see below).
 - `pnpm server:prod` -- run the server with `PORT=3001`, production.
+  Same restriction.
 - `pnpm typecheck` -- `tsc --noEmit` over `apps/mobile`.
 - `pnpm test` -- the Vitest unit suites (`vitest run`). Both root scripts
   delegate to `@ota-gateway/mobile`; the same two commands are the CI merge gate
@@ -46,6 +48,32 @@ Both server instances run `tsx server/index.ts` from `apps/mobile` (so
 > **run** server`. The explicit `run` is required: `server` is also a pnpm
 > built-in subcommand, so `pnpm --filter ... server` (no `run`) fails with
 > `Unknown option: 'recursive'` instead of invoking the package script.
+
+## Mode B serving: the Docker gateway containers
+
+**Mode B testing must be served from the standalone Docker containers, never
+from host-run dev servers.** The container is a release artifact -- a baked
+`dist/` export behind `server/index.ts` with only the server runtime installed
+(express / expo-server / tsx; no RN or Expo dev tree) -- so what the host app
+receives is exactly what production serving looks like. Mode A always uses the
+Expo/Metro dev server (`pnpm --filter @ota-gateway/mobile start`); the
+host-run `pnpm server:*` scripts remain only for quick standalone-web
+iteration in a browser.
+
+```
+pnpm --filter @ota-gateway/mobile export   # produce dist/ first
+docker compose up --build -d               # gateway-dev :3000, gateway-prod :3001
+docker compose down                        # stop
+```
+
+Defined by the root `docker-compose.yml` building `apps/mobile/Dockerfile`.
+Because `dist/` is baked into the image, **every re-export requires
+`docker compose up --build`** -- the running containers do not see host-side
+exports (that staleness is deliberate; it is what makes the artifact
+trustworthy). Each container exposes `/healthz`; `docker ps` shows
+`(healthy)` when serving. Ports/environments match the old host-run layout
+(`:3000` development, `:3001` production), so the app-side configuration is
+unchanged.
 
 ## Networking
 
@@ -136,7 +164,7 @@ End-to-end verification order:
 1  pnpm install
 1b pnpm typecheck && pnpm test                     # type check + Vitest unit suites (the CI gate)
 2  pnpm --filter @ota-gateway/mobile export        # export-web.mjs (all platforms) + manifest
-3  pnpm server:dev & pnpm server:prod
+3  docker compose up --build -d              # gateway containers (Mode B serving)
 4  browser: standalone web on :3000; curl manifests on :3000/:3001 -- distinct update ids
 4b standalone native spot-check: npx expo run:ios / run:android
 5  cd apps/mobile && node scripts/prebuild.mjs --android
@@ -173,9 +201,12 @@ served it. A wrong `expo-runtime-version` returns `204`; a missing/invalid
 
 The DONE demo -- an actual JS change delivered over the air:
 
-1. Servers up; a host in Mode B shows `OTA marker: v1` and its update id.
+1. Gateway containers up; a host in Mode B shows `OTA marker: v1` and its
+   update id.
 2. Edit `src/constants/marker.ts` to `OTA marker: v2`, then
-   `pnpm --filter @ota-gateway/mobile export`.
+   `pnpm --filter @ota-gateway/mobile export` and
+   `docker compose up --build -d` (the containers bake `dist/`, so they must be
+   rebuilt to serve the new export).
 3. In the app: **Check for update** -> true -> **Download** -> **Restart**. The
    Developer shows `OTA marker: v2`, `isEmbeddedLaunch false`, and a new update
    id.
@@ -211,9 +242,9 @@ Each implementation phase is traceable to a doc section; verify against it.
 | --- | --- |
 | Scaffold + app port | `pnpm install`; `pnpm typecheck`; `pnpm test` (all unit suites green); prebuild both platforms; grep generated Swift for `initializeUpdates` + `bundleURLOverride`, Kotlin for `OtaUpdatesEnvironment` + private `bootReactNative`, `build.gradle.kts` for `singleVariant("release")` + brotli; `Expo.plist` has both `OtaUpdatesURL*` keys. |
 | Unit tests + CI | `pnpm typecheck` and `pnpm test` pass locally and in `.github/workflows/ci.yml`; the drift-guard suite ties plugin constants, `app.json`, the native host sources, and the Android AAR coordinate together, so a cross-layer rename fails here. |
-| Demo backend | Export -> start both -> web loads on `:3000`/`:3001`; curl manifests (above) -- 200 multipart, ids differ, launch asset 200s, wrong runtime -> 204, missing platform -> 400. Standalone native boots via `expo run:ios`/`run:android`; standalone reload uses `Updates.reloadAsync()`. |
+| Demo backend | Export -> `docker compose up --build -d` -> web loads on `:3000`/`:3001`; curl manifests (above) -- 200 multipart, ids differ, launch asset 200s, wrong runtime -> 204, missing platform -> 400. Standalone native boots via `expo run:ios`/`run:android`; standalone reload uses `Updates.reloadAsync()`. |
 | Android artifact + host | assembleDebug -> install -> reverses -> Mode B (embedded bundle loads; check/download/restart lands); env toggle + relaunch -> different update id; Mode A (toggle + relaunch + Metro, Fast Refresh works). |
-| iOS packaging + host | xcodegen -> xcodebuild simulator (`CODE_SIGNING_ALLOWED=NO`) -> simctl install/launch -> Mode B OTA flow; repackage Debug -> Mode A. |
+| iOS packaging + host | xcodegen -> xcodebuild simulator (ad-hoc signed; no `CODE_SIGNING_ALLOWED=NO`) -> simctl install/launch -> Mode B OTA flow; repackage Debug -> Mode A. |
 | OTA delivery proof | The marker-bump procedure above, on both platforms. |
 
 For both native hosts, also cycle Developer -> Sky -> Spinner -> Developer and

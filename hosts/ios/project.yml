@@ -1,8 +1,8 @@
 # XcodeGen project for the iOS brownfield host.
 #
-# Simulator-only demo host (CODE_SIGNING_ALLOWED=NO). The .xcodeproj is
-# generated from this file (`xcodegen generate`) and gitignored; regenerate it
-# after editing this file or after repackaging the frameworks.
+# Simulator-only demo host (ad-hoc signed; see the signing note below). The
+# .xcodeproj is generated from this file (`xcodegen generate`) and gitignored;
+# regenerate it after editing this file or after repackaging the frameworks.
 #
 # Frameworks come from the apps/mobile iOS packaging output
 # (ios/.brownfield/package/build), produced by scripts/package-ios.sh. Run that
@@ -22,11 +22,16 @@ options:
     iOS: "15.1"
   createIntermediateGroups: true
 
+# Ad-hoc signing (identity "-"): free -- no certificates or team -- but unlike
+# CODE_SIGNING_ALLOWED=NO it embeds the entitlements below, which keychain
+# access (expo-secure-store) requires even on the simulator. Do NOT pass
+# CODE_SIGNING_ALLOWED=NO on the xcodebuild command line; it would override
+# these settings and silently break SecureStore persistence again.
 settings:
   base:
-    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_ALLOWED: YES
     CODE_SIGNING_REQUIRED: NO
-    CODE_SIGN_IDENTITY: ""
+    CODE_SIGN_IDENTITY: "-"
 
 targets:
   OtaHost:
@@ -41,6 +46,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: OtaHost/Info.plist
+        CODE_SIGN_ENTITLEMENTS: OtaHost/OtaHost.entitlements
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: dev.otagateway.host
         PRODUCT_NAME: OtaHost
