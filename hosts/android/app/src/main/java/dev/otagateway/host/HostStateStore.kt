@@ -35,7 +35,13 @@ object HostStateStore {
         ReactNativeBrownfield.shared.addMessageListener(
             OnMessageListener { message ->
                 parseSaveState(message)?.let { (key, stateJson) ->
-                    prefs(appContext).edit().putString(key, stateJson).apply()
+                    // commit() (synchronous), NOT apply(): surviving process
+                    // death is this store's whole point, and a force-stop can
+                    // drop apply()'s asynchronously-flushed write -- the
+                    // spinner then resumes idle after a kill. The listener
+                    // runs off the main thread, so the blocking write is fine.
+                    @Suppress("ApplySharedPref")
+                    prefs(appContext).edit().putString(key, stateJson).commit()
                 }
             },
         )

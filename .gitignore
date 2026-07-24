@@ -27,7 +27,7 @@ apps/mobile/modules/*/android/build/
 # xcodebuild derived-data output. The project.yml + OtaHost/ sources are tracked;
 # the generated .xcodeproj and build/ are not.
 hosts/ios/*.xcodeproj
-hosts/ios/build/
+hosts/ios/build*/
 
 # generated Android host build output (the Gradle wrapper + sources are tracked;
 # build dirs, caches, and machine-local config are not)

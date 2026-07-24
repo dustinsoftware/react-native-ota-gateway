@@ -64,7 +64,9 @@ appId: dev.otagateway.host
     visible:
       id: "spinner-state"
     timeout: 30000
-- assertVisible: "spinning"
+- extendedWaitUntil:
+    visible: "spinning"
+    timeout: 15000
 
 # Process death: kill + relaunch. The persisted tab restores Spinner and the
 # coast resumes from the last checkpoint.
@@ -74,4 +76,9 @@ appId: dev.otagateway.host
     visible:
       id: "spinner-state"
     timeout: 60000
-- assertVisible: "spinning"
+# The resumed coast's first read-out sample lands within ~800ms, but a cold
+# start under CI-class machine load can stall emulator frames -- wait, don't
+# insta-assert.
+- extendedWaitUntil:
+    visible: "spinning"
+    timeout: 15000
