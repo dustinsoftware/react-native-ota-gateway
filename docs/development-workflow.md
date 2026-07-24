@@ -163,6 +163,16 @@ artifact and the OTA flow.
 Switching Mode A <-> Mode B is just swapping which framework/toggle is active
 (rebuild + reinstall on iOS; flip the toggle on Android) -- no app code changes.
 
+The hosts' **More tab** (native Test menu -> pushed RN/native screens; see
+[brownfield.md](./brownfield.md)) has Maestro flows covering the mix-and-match
+matrix on both platforms: `.maestro/verify-more-tab-ios.yaml` and
+`.maestro/verify-more-tab-android.yaml`. Run them as part of Mode B
+verification (`maestro test <flow>`; pass `--device <udid>` when both a
+simulator and an emulator are connected). NOTE: a fresh export is picked up on
+the SECOND app launch (expo-updates downloads in the background and applies on
+relaunch) -- cycle the app once after `docker compose up --build -d` or the
+flows assert against the previous bundle (`/test-one` unmatched).
+
 ## The canonical runbook
 
 End-to-end verification order:

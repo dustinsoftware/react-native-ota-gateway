@@ -340,6 +340,28 @@ The Developer tab shows a native Settings action.
 selected environment, and manual RN reload. Routes are selected only by the
 native tab bar; the old "Open RN" buttons no longer exist.
 
+### More tab -- pushed native/RN screens
+
+The fourth tab, **More**, is NATIVE (`MoreMenuViewController`, a table of
+Test 1 / Test 2 / Test 3). It mounts no RN surface in the shell's content
+slot; its rows PUSH dedicated screens onto the shell's `UINavigationController`
+-- the standard nav-bar title + back chevron + push transition, mirroring how
+the product hosts present a pushed RN screen:
+
+- **Test 1 / Test 2** push RN screens (`/test-one`, `/test-two`), built through
+  `BrownfieldReloader.makeViewController` so an OTA reload accounts for them.
+  Test 1 contains an RN-internal link to Test 2 -- navigation WITHIN the pushed
+  surface; the RN-side back button pops it without touching the native stack.
+- **Test 3** pushes a fully native screen with the same presentation, and its
+  button pushes RN Test 1 on top: native menu -> native screen -> RN screen on
+  one back stack is the mix-and-match point of the demo.
+
+While More is selected, a pushed Test screen is the ONLY live RN surface (the
+shell mounts none), so the one-ExpoRoot rule holds. On an OTA reload the shell
+pops to root first (`rebuildActiveSurface`): a pushed RN screen predates the
+runtime restart and cannot be rebuilt in place on the stack. The
+`.maestro/verify-more-tab-ios.yaml` flow covers the whole matrix.
+
 ### ATS
 
 `Info.plist` sets **`NSAllowsLocalNetworking: true`** so App Transport Security
@@ -495,6 +517,43 @@ relaunch, or process death.
 The Developer toolbar action opens native Host Settings: OTA URLs, environment
 radio, "Use Metro dev server" toggle, and Relaunch. The former native-only
 `MainActivity` and its route-opening buttons were removed.
+
+### More tab -- pushed native/RN screens
+
+The fourth tab, **More**, is NATIVE (`HostRoute.MORE`, `path == null`): the
+shell mounts the Test menu instead of an RN fragment, and the rows PUSH
+dedicated activities -- the per-activity hosting pattern the product hosts
+landed on for pushed RN screens:
+
+- **Test 1 / Test 2** push `RNScreenActivity` (`/test-one`, `/test-two`): a
+  toolbar with title + back arrow above a `ReactNativeFragment`
+  (`PushedScreenShell`), `singleTop` to absorb double taps, native slide
+  transitions (`Theme.OtaHost.Pushed`). The toolbar arrow routes through the
+  OnBackPressedDispatcher -- the same path as hardware Back -- so the
+  brownfield callback offers the press to RN JS first and an RN-internal push
+  (Test 1 -> Test 2) pops before the activity finishes.
+- **Test 3** pushes the fully native `NativeTestActivity` with the same chrome;
+  its button pushes RN Test 1 on top (native -> RN mixing on one back stack).
+
+**Per-activity hosting is load-bearing, not just presentation.** Callstack's
+`ReactNativeFragment.createView` registers an Activity-scoped
+`OnBackPressedCallback` with no fragment lifecycle owner. Hosting RN screens as
+fragments swapped inside a SHARED activity therefore leaks callbacks across
+visits -- the second visit's Back goes dead (the product repos shipped a
+package patch for exactly this before rehosting per-activity). A dedicated
+activity per RN surface gives every visit a fresh dispatcher and the leak
+cannot manifest; the double-visit case is pinned by
+`.maestro/verify-more-tab-android.yaml`. If an RN screen is ever
+fragment-hosted in a shared activity again, that upstream bug returns --
+re-apply a package patch or fix it upstream first.
+
+While More is selected the shell mounts NO RN fragment, so a pushed Test
+screen is the only live RN surface, matching iOS.
+
+Unlike iOS (which pops to root on an OTA rebuild), Android needs no special
+handling for a pushed `RNScreenActivity` during an OTA reload:
+`BrownfieldReloadHandler` relaunches the shared `ReactHost` in place, so a
+pushed RN fragment re-renders on the live runtime where it stands.
 
 ### Cleartext networking
 

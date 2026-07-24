@@ -30,6 +30,27 @@
             android:label="@string/settings_title"
             android:parentActivityName=".RNHostActivity" />
 
+        <!-- Pushed RN screen (More tab Test 1/2). A dedicated activity per RN
+             surface is load-bearing (fresh OnBackPressedDispatcher per visit;
+             see RNScreenActivity). singleTop absorbs launcher-row double taps.
+             configChanges mirrors RNHostActivity so RN handles rotation itself. -->
+        <activity
+            android:name=".RNScreenActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize"
+            android:launchMode="singleTop"
+            android:parentActivityName=".RNHostActivity"
+            android:theme="@style/Theme.OtaHost.Pushed"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native pushed screen (More tab Test 3); same chrome as the RN ones. -->
+        <activity
+            android:name=".NativeTestActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:parentActivityName=".RNHostActivity"
+            android:theme="@style/Theme.OtaHost.Pushed" />
+
     </application>
 
 </manifest>

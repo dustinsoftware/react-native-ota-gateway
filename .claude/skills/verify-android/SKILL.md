@@ -78,7 +78,11 @@ Toggle **off** (the default). Metro need not run.
 
 1. Launch the host on the Developer native tab.
 2. **Pass criteria:** the embedded bundle loads; Developer shows the current
-   `OTA marker` and an update id; the RN tab bar is hidden.
+   `OTA marker` and an update id; the RN tab bar is hidden. The More tab's
+   mix-and-match matrix passes:
+   `maestro test .maestro/verify-more-tab-android.yaml` (native menu, pushed RN
+   Test 1/2 with toolbar/hardware back, RN-internal navigation popping first,
+   the DOUBLE-VISIT back regression, native Test 3 pushing RN on top).
 3. OTA flow: **Check for update** -> **Download** -> **Restart** (the brownfield
    reload relaunches the RN root; no process kill).
 4. Open native Settings, flip the **environment radio**, and relaunch -> a

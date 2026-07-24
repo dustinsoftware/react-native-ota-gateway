@@ -4,4 +4,19 @@
          satisfying Material Components (required by BottomNavigationView in the
          host shell). The host UI is otherwise built programmatically. -->
     <style name="Theme.OtaHost" parent="Theme.MaterialComponents.DayNight.NoActionBar.Bridge" />
+
+    <!-- Pushed screens (RNScreenActivity / NativeTestActivity): native slide
+         in/out, matching how product hosts present a pushed screen. Declared as
+         a window animation style so no (deprecated) overridePendingTransition
+         call is needed. -->
+    <style name="Theme.OtaHost.Pushed">
+        <item name="android:windowAnimationStyle">@style/PushedScreenAnimations</item>
+    </style>
+
+    <style name="PushedScreenAnimations" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/slide_in_right</item>
+        <item name="android:activityOpenExitAnimation">@anim/slide_out_left</item>
+        <item name="android:activityCloseEnterAnimation">@anim/slide_in_left</item>
+        <item name="android:activityCloseExitAnimation">@anim/slide_out_right</item>
+    </style>
 </resources>

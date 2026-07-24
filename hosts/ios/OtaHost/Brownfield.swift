@@ -15,32 +15,41 @@ enum Brownfield {
     static let skyRoute = "/sky"
     /// RN route for the Spinner screen.
     static let spinnerRoute = "/spinner"
+    /// RN route for the More tab's Test 1 pushed screen.
+    static let testOneRoute = "/test-one"
+    /// RN route for the More tab's Test 2 pushed screen.
+    static let testTwoRoute = "/test-two"
     /// Message `type` the JS side posts after an OTA update download.
     static let reloadMessageType = "reload"
 }
 
-/// A native host tab. Each tab mounts exactly one RN surface at its route; the
-/// host shell keeps only the active tab's surface alive (see
-/// `HostShellViewController`).
+/// A native host tab. RN tabs (`route != nil`) mount exactly one RN surface at
+/// their route; the host shell keeps only the active tab's surface alive (see
+/// `HostShellViewController`). `more` is a NATIVE tab: it mounts the native
+/// Test menu, whose rows PUSH dedicated screens on the navigation stack.
 enum HostTab: Int, CaseIterable {
     case developer
     case sky
     case spinner
+    case more
 
     var title: String {
         switch self {
         case .developer: return "Developer"
         case .sky: return "Sky"
         case .spinner: return "Spinner"
+        case .more: return "More"
         }
     }
 
     /// RN route this tab mounts, passed as the surface's `initialUrl`.
-    var route: String {
+    /// `nil` for the native More tab, which mounts no RN surface.
+    var route: String? {
         switch self {
         case .developer: return Brownfield.developerRoute
         case .sky: return Brownfield.skyRoute
         case .spinner: return Brownfield.spinnerRoute
+        case .more: return nil
         }
     }
 
@@ -50,6 +59,7 @@ enum HostTab: Int, CaseIterable {
         case .developer: return "wrench.and.screwdriver"
         case .sky: return "cloud"
         case .spinner: return "arrow.triangle.2.circlepath"
+        case .more: return "ellipsis"
         }
     }
 }

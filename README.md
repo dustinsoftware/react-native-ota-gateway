@@ -18,9 +18,11 @@ targets from the same source:
   host app embeds to render RN screens inside an existing native app.
 
 Two minimal native host apps (`hosts/ios`, `hosts/android`) embed the brownfield
-artifacts and own a three-item native tab bar (Developer, Sky, Spinner). Each
-host keeps one RN surface mounted at a time and passes the selected route as
-`initialUrl`, demonstrating that the host owns navigation state. Host-only OTA
+artifacts and own a four-item native tab bar (Developer, Sky, Spinner, More).
+Each host keeps at most one RN surface mounted at a time and passes the selected
+route as `initialUrl`, demonstrating that the host owns navigation state. The
+More tab is fully native: a Test menu whose rows push RN and native screens on
+one back stack (the mix-and-match demo). Host-only OTA
 environment and Metro controls live behind the Developer tab's native Settings
 action.
 

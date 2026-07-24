@@ -86,9 +86,14 @@ in by `package-ios.sh`. `-derivedDataPath build` pins the `.app` output path so
 **Pass criteria:**
 - App boots and renders the RN screen inside the native host.
 - Developer shows the current `OTA marker` and an update id.
-- The native Developer/Sky/Spinner tab bar is visible; the RN tab bar is hidden.
+- The native Developer/Sky/Spinner/More tab bar is visible; the RN tab bar is
+  hidden.
 - Manifest curl returns `200 multipart/mixed` and the `:3000` vs `:3001` ids
   differ for identical bytes (see below).
+- The More tab's mix-and-match matrix passes:
+  `maestro --device <udid> test .maestro/verify-more-tab-ios.yaml` (native menu,
+  pushed RN Test 1/2 with nav-bar back, RN-internal Test 1 -> Test 2
+  navigation, second visit, native Test 3 pushing RN on top).
 
 ### OTA delivery proof (the DONE demo)
 

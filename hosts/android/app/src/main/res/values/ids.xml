@@ -8,6 +8,13 @@
     <item name="nav_developer" type="id" />
     <item name="nav_sky" type="id" />
     <item name="nav_spinner" type="id" />
+    <item name="nav_more" type="id" />
+    <item name="item_test_one" type="id" />
+    <item name="item_test_two" type="id" />
+    <item name="item_test_three" type="id" />
+    <item name="pushed_screen_toolbar" type="id" />
+    <item name="pushed_screen_container" type="id" />
+    <item name="button_push_rn_test_one" type="id" />
     <item name="action_settings" type="id" />
     <item name="radio_env_development" type="id" />
     <item name="radio_env_production" type="id" />

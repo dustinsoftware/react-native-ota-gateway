@@ -4,12 +4,14 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Menu
 import android.view.MenuItem
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.os.bundleOf
@@ -19,9 +21,13 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 /**
  * Launcher and host shell. Mirrors the eng-regal-hybrid-app lifecycle: one
  * shared, already-initialized brownfield runtime (booted in
- * [OtaHostApplication]) with exactly ONE mounted [ReactNativeFragment] at a
- * time. The shell is a toolbar, a single fragment container, and a
- * [BottomNavigationView] with the Developer / Sky / Spinner tabs.
+ * [OtaHostApplication]) with at most ONE mounted [ReactNativeFragment] at a
+ * time. The shell is a toolbar, a single content container, and a
+ * [BottomNavigationView] with the Developer / Sky / Spinner / More tabs. The
+ * first three mount an RN surface; More is NATIVE -- a Test menu whose rows
+ * PUSH dedicated screens on the back stack ([RNScreenActivity] for the RN
+ * Test 1/2, [NativeTestActivity] for the native Test 3), so while More is
+ * selected the only live RN surface is a pushed one.
  *
  * Callstack constraint (load-bearing): the brownfield fragment's createView
  * registers an Activity-scoped OnBackPressedCallback with **no fragment
@@ -89,16 +95,76 @@ class RNHostActivity : AppCompatActivity() {
         }
         setContentView(root)
 
-        if (supportFragmentManager.findFragmentById(container.id) == null) {
+        val routePath = currentRoute.path
+        if (routePath == null) {
+            // Native tab (More): no RN surface -- remove a restored fragment
+            // from a previous RN tab, then mount the native Test menu.
+            supportFragmentManager.findFragmentById(container.id)?.let { fragment ->
+                supportFragmentManager.beginTransaction().remove(fragment).commitNow()
+            }
+            container.addView(buildMoreMenu())
+        } else if (supportFragmentManager.findFragmentById(container.id) == null) {
             val fragment = ReactNativeFragment.createReactNativeFragment(
-                RN_MODULE_NAME,
-                bundleOf("initialUrl" to currentRoute.path),
+                Brownfield.RN_MODULE_NAME,
+                bundleOf("initialUrl" to routePath),
             )
             supportFragmentManager.beginTransaction()
                 .replace(container.id, fragment)
                 .commit()
         }
     }
+
+    /** One row of the More tab's native menu (mirrors iOS MoreMenuViewController.Row). */
+    private data class MoreMenuRow(val rowId: Int, val labelRes: Int, val onClick: () -> Unit)
+
+    /**
+     * The More tab's native menu. Test 1 / Test 2 push RN screens, Test 3 a
+     * native screen -- each a dedicated activity sharing the pushed-screen
+     * chrome ([PushedScreenShell]), demonstrating native and RN screens mixed
+     * on one back stack.
+     */
+    private fun buildMoreMenu(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            listOf(
+                MoreMenuRow(R.id.item_test_one, R.string.test_one_title) {
+                    RNScreenActivity.start(
+                        this@RNHostActivity,
+                        Brownfield.TEST_ONE_ROUTE,
+                        getString(R.string.test_one_title),
+                    )
+                },
+                MoreMenuRow(R.id.item_test_two, R.string.test_two_title) {
+                    RNScreenActivity.start(
+                        this@RNHostActivity,
+                        Brownfield.TEST_TWO_ROUTE,
+                        getString(R.string.test_two_title),
+                    )
+                },
+                MoreMenuRow(R.id.item_test_three, R.string.test_three_title) {
+                    NativeTestActivity.start(this@RNHostActivity)
+                },
+            ).forEach { row ->
+                addView(
+                    buildMoreMenuRow(row.rowId, getString(row.labelRes), row.onClick),
+                    LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT),
+                )
+            }
+        }
+
+    private fun buildMoreMenuRow(rowId: Int, label: String, onClick: () -> Unit) =
+        TextView(this).apply {
+            id = rowId
+            text = label
+            textSize = 18f
+            setPadding(48, 48, 48, 48)
+            isClickable = true
+            isFocusable = true
+            val outValue = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+            setBackgroundResource(outValue.resourceId)
+            setOnClickListener { onClick() }
+        }
 
     private fun buildBottomNav(): BottomNavigationView =
         BottomNavigationView(this).apply {
@@ -121,6 +187,8 @@ class RNHostActivity : AppCompatActivity() {
                 .setIcon(android.R.drawable.ic_menu_compass)
             menu.add(Menu.NONE, R.id.nav_spinner, Menu.NONE, getString(R.string.tab_spinner))
                 .setIcon(android.R.drawable.ic_menu_rotate)
+            menu.add(Menu.NONE, R.id.nav_more, Menu.NONE, getString(R.string.tab_more))
+                .setIcon(android.R.drawable.ic_menu_more)
             // Reflect the mounted route without triggering a relaunch; the
             // listener also guards on currentRoute, so no relaunch loop starts.
             selectedItemId = menuIdFor(currentRoute)
@@ -151,6 +219,7 @@ class RNHostActivity : AppCompatActivity() {
             HostRoute.DEVELOPER -> R.id.nav_developer
             HostRoute.SKY -> R.id.nav_sky
             HostRoute.SPINNER -> R.id.nav_spinner
+            HostRoute.MORE -> R.id.nav_more
         }
 
     private fun routeForMenuId(menuId: Int): HostRoute? =
@@ -158,10 +227,7 @@ class RNHostActivity : AppCompatActivity() {
             R.id.nav_developer -> HostRoute.DEVELOPER
             R.id.nav_sky -> HostRoute.SKY
             R.id.nav_spinner -> HostRoute.SPINNER
+            R.id.nav_more -> HostRoute.MORE
             else -> null
         }
-
-    companion object {
-        private const val RN_MODULE_NAME = "OtaGatewayApp"
-    }
 }

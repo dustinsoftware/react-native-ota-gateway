@@ -1,0 +1,113 @@
+# Verifies the More tab's mix-and-match demo on the Android host (Mode B):
+# native menu -> pushed RN screens (Test 1/2) with the native toolbar/back
+# pattern, RN-internal navigation popping before the native screen closes,
+# the DOUBLE-VISIT back regression (a second visit's Back must still work --
+# the upstream brownfield callback leak class), and the native Test 3 screen
+# pushing an RN screen on top.
+#
+# Preconditions: emulator running with `adb reverse` for :3000/:3001, gateway
+# containers serving the current export, host APK installed, Metro toggle off.
+appId: dev.otagateway.host
+---
+# Self-warm: a fresh export is applied on the SECOND launch (expo-updates
+# downloads in the background and applies on relaunch), and the new /test-one
+# route exists only in the fresh bundle -- without this cycle the flow would
+# assert against the previous bundle.
+- launchApp
+- extendedWaitUntil:
+    visible: "OTA Gateway Host"
+    timeout: 30000
+- stopApp
+# The shell restores the persisted tab, so select Developer explicitly before
+# asserting the OTA marker (a previous run may have left the app on More).
+- launchApp
+- tapOn: "Developer"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000
+
+# The native More tab shows the Test menu (no RN surface mounted).
+- tapOn: "More"
+- assertVisible: "Test 1"
+- assertVisible: "Test 2"
+- assertVisible: "Test 3"
+
+# Visit 1: RN Test 1 pushed with native toolbar. Counter proves live RN state.
+- tapOn: "Test 1"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- assertVisible: "Taps: 0"
+- tapOn:
+    id: "test-one-counter"
+- assertVisible: "Taps: 1"
+
+# RN-internal push: Test 1 -> Test 2 inside the same pushed surface. The
+# native toolbar arrow must pop the RN stack FIRST (back offered to RN JS),
+# then close the native screen.
+- tapOn:
+    id: "test-one-link-test-two"
+- extendedWaitUntil:
+    visible:
+      id: "test-two-screen"
+    timeout: 15000
+- tapOn: "Navigate up"
+- assertVisible:
+    id: "test-one-screen"
+- tapOn: "Navigate up"
+- assertVisible: "Test 3"
+
+# Visit 2 (the double-visit regression): a fresh activity means a fresh back
+# dispatcher -- hardware Back must still close the screen. The counter must be
+# fresh too (no state bleed from visit 1's mount).
+- tapOn: "Test 1"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- assertVisible: "Taps: 0"
+- pressKey: back
+- assertVisible: "Test 3"
+
+# RN Test 2 pushed directly from the menu (no route bleed: it must render
+# Test 2, not the previously mounted Test 1).
+- tapOn: "Test 2"
+- extendedWaitUntil:
+    visible:
+      id: "test-two-screen"
+    timeout: 30000
+- pressKey: back
+- assertVisible: "Test 3"
+
+# Native Test 3, which pushes RN Test 1 on top (native -> RN mixing).
+- tapOn: "Test 3"
+- assertVisible: "Push RN Test 1"
+- tapOn: "Push RN Test 1"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 30000
+- pressKey: back
+- assertVisible: "Push RN Test 1"
+- tapOn: "Navigate up"
+- assertVisible: "Test 2"
+
+# The RN tabs still work after all the pushing, including under repeated
+# cycling (the later-mount blank class -- see docs/brownfield.md gotchas).
+- repeat:
+    times: 3
+    commands:
+      - tapOn: "Developer"
+      - extendedWaitUntil:
+          visible:
+            id: "bundle-marker"
+          timeout: 60000
+      - tapOn: "More"
+      - assertVisible: "Test 1"
+- tapOn: "Developer"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000

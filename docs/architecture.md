@@ -60,8 +60,9 @@ serve all of them.
 - **Brownfield artifacts** are built by the packaging pipeline (see
   [brownfield.md](./brownfield.md)). A native host registers the RN module
   `OtaGatewayApp` and renders any route by passing an `initialUrl` prop. The
-  demo hosts own a three-item native tab bar (Developer, Sky, Spinner) and mount
-  exactly one RN surface at a time. Selecting a native tab replaces that
+  demo hosts own a four-item native tab bar (Developer, Sky, Spinner, More) and
+  mount at most one RN surface at a time (the native More tab mounts none; its
+  Test rows push RN/native screens instead). Selecting a native tab replaces that
   surface with the selected route while the shared RN runtime stays initialized.
 
 The brownfield entry (`src/brownfield/entry.tsx`) is an *addition*: it registers

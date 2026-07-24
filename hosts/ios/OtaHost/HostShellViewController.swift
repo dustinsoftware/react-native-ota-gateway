@@ -3,14 +3,17 @@ import UIKit
 
 /// The native host shell and the app's navigation root.
 ///
-/// It owns a bottom `UITabBar` (Developer / Sky / Spinner) and a single content
-/// slot that hosts EXACTLY ONE React Native surface at a time. Selecting a tab
-/// tears down and deallocates the previous `ReactNativeViewController` and
-/// mounts a fresh one for the tab's route through `BrownfieldReloader`, so there
-/// are never two concurrent ExpoRoot surfaces.
+/// It owns a bottom `UITabBar` (Developer / Sky / Spinner / More) and a single
+/// content slot that hosts at most ONE React Native surface at a time.
+/// Selecting an RN tab tears down and deallocates the previous surface and
+/// mounts a fresh one for the tab's route through `BrownfieldReloader`, so
+/// there are never two concurrent ExpoRoot surfaces. The More tab is NATIVE
+/// (`MoreMenuViewController`): it mounts no RN surface, and its Test rows push
+/// dedicated screens onto the navigation stack -- so a pushed RN Test screen
+/// is the only live RN surface while More is selected.
 ///
 /// A deliberate `UITabBar` (not a `UITabBarController`) is used so the shell
-/// does not retain three RN roots -- only the active surface exists. The shell
+/// does not retain an RN root per tab -- only the active surface exists. The shell
 /// also provides the native navigation context: a title per tab and, on the
 /// Developer tab, a Settings action that presents `HostSettingsViewController`.
 ///
@@ -46,8 +49,11 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
     /// Rebuild the active RN surface after the runtime restarted (OTA reload or
     /// manual reload). The reloader has already restarted the runtime; here we
     /// only recreate the surface for the current tab, leaving the selected tab
-    /// and any presented settings untouched.
+    /// and any presented settings untouched. Any PUSHED screen (the More tab's
+    /// Tests) is popped first: a pushed RN screen predating the restart sits on
+    /// the torn-down runtime and cannot be rebuilt in place on the stack.
     func rebuildActiveSurface() {
+        navigationController?.popToRootViewController(animated: false)
         mountSurface(for: selectedTab)
     }
 
@@ -101,9 +107,18 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
         navigationItem.rightBarButtonItem = selectedTab == .developer ? settingsButton : nil
     }
 
-    /// Mount the single RN surface for a tab, tearing down the previous one
-    /// first so only one ExpoRoot surface is ever live.
+    /// Mount a tab's content in the single content slot, tearing down the
+    /// previous surface first. RN tabs mount one RN surface (so only one
+    /// ExpoRoot surface is ever live); the native More tab mounts the Test
+    /// menu and leaves NO RN surface mounted -- its rows push dedicated
+    /// screens on the navigation stack instead.
     private func mountSurface(for tab: HostTab) {
+        guard let route = tab.route else {
+            removeCurrentSurface()
+            embedSurface(MoreMenuViewController())
+            return
+        }
+
         // While a runtime restart is in flight the RN runtime is down; a
         // surface mounted now (e.g. a tab switch landing in that window)
         // would sit on a dead runtime. Skip it -- the restart completion
@@ -114,9 +129,13 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
 
         let controller = BrownfieldReloader.shared.makeViewController(
             moduleName: Brownfield.moduleName,
-            initialProperties: [Brownfield.initialUrlKey: tab.route],
+            initialProperties: [Brownfield.initialUrlKey: route],
             title: tab.title
         )
+        embedSurface(controller)
+    }
+
+    private func embedSurface(_ controller: UIViewController) {
         addChild(controller)
         controller.view.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(controller.view)

@@ -3,21 +3,23 @@ package dev.otagateway.host
 import android.content.Context
 
 /**
- * The native tabs the host shell exposes, each mapped to the Expo Router route
- * it mounts in the shared brownfield runtime. Order matches the
- * BottomNavigationView order in [RNHostActivity].
+ * The native tabs the host shell exposes. RN tabs carry the Expo Router route
+ * they mount in the shared brownfield runtime; [MORE] is a NATIVE tab
+ * (`path == null`) that mounts the native Test menu instead of an RN surface.
+ * Order matches the BottomNavigationView order in [RNHostActivity].
  */
-enum class HostRoute(val path: String) {
+enum class HostRoute(val path: String?) {
     DEVELOPER("/developer"),
     SKY("/sky"),
     SPINNER("/spinner"),
+    MORE(null),
     ;
 
     companion object {
         val DEFAULT = DEVELOPER
 
-        fun fromPath(path: String?): HostRoute =
-            entries.firstOrNull { it.path == path } ?: DEFAULT
+        fun fromName(name: String?): HostRoute =
+            entries.firstOrNull { it.name == name } ?: DEFAULT
     }
 }
 
@@ -28,7 +30,8 @@ enum class HostRoute(val path: String) {
  * Tab switching relaunches [RNHostActivity] rather than swapping fragments in
  * place (see the class doc for why), so the selected route must survive that
  * relaunch. It also survives an OTA relaunch and process death, so the host
- * restores the same tab the user was on.
+ * restores the same tab the user was on. Stored by enum name (not RN path;
+ * the native More tab has none); unknown values fall back to [HostRoute.DEFAULT].
  */
 object HostRoutePrefs {
     private const val NAME = "dev.otagateway.host.route"
@@ -38,9 +41,9 @@ object HostRoutePrefs {
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
     fun selectedRoute(context: Context): HostRoute =
-        HostRoute.fromPath(prefs(context).getString(KEY_ROUTE, null))
+        HostRoute.fromName(prefs(context).getString(KEY_ROUTE, null))
 
     fun setSelectedRoute(context: Context, route: HostRoute) {
-        prefs(context).edit().putString(KEY_ROUTE, route.path).apply()
+        prefs(context).edit().putString(KEY_ROUTE, route.name).apply()
     }
 }

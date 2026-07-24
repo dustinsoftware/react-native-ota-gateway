@@ -33,6 +33,9 @@ const HOST_ROUTES = [
   { path: '/developer', file: 'src/app/(tabs)/developer/index.tsx' },
   { path: '/sky', file: 'src/app/(tabs)/sky.tsx' },
   { path: '/spinner', file: 'src/app/(tabs)/spinner.tsx' },
+  // Pushed from the More tab's Test 1 / Test 2 rows (not shell tabs).
+  { path: '/test-one', file: 'src/app/test-one.tsx' },
+  { path: '/test-two', file: 'src/app/test-two.tsx' },
 ] as const;
 
 function readAppJson(): {
@@ -129,6 +132,54 @@ describe('native host sources match the plugin coupling constants', () => {
       expect(existsSync(path.join(APP_ROOT, file))).toBe(true);
     },
   );
+});
+
+describe('Maestro flows reference selectors that exist in the sources', () => {
+  // The .maestro flows are the only automated coverage for the host shells'
+  // More tab, and their id selectors couple to RN testIDs and native
+  // accessibility identifiers by string literal -- exactly the cross-layer
+  // drift this suite exists to catch. A renamed testID builds green and only
+  // fails on-device; this pins each id to some source literal at PR time.
+  const MAESTRO_DIR = path.join(REPO_ROOT, '.maestro');
+
+  function sourcesUnder(dir: string, extensions: string[]): string {
+    return (readdirSync(dir, { recursive: true }) as string[])
+      .filter((f) => extensions.some((ext) => f.endsWith(ext)))
+      .map((f) => readFileSync(path.join(dir, f), 'utf8'))
+      .join('\n');
+  }
+
+  const flows = readdirSync(MAESTRO_DIR).filter((f) => f.endsWith('.yaml'));
+
+  it.each(flows)('every id selector in %s exists in a source file', (flow) => {
+    const yaml = readFileSync(path.join(MAESTRO_DIR, flow), 'utf8');
+    const ids = [...yaml.matchAll(/^\s*id: "([^"]+)"\s*$/gm)].map((m) => m[1]);
+    expect(ids.length).toBeGreaterThan(0);
+
+    const haystack = [
+      sourcesUnder(path.join(APP_ROOT, 'src'), ['.tsx', '.ts']),
+      sourcesUnder(path.join(REPO_ROOT, 'hosts', 'ios', 'OtaHost'), ['.swift']),
+      sourcesUnder(
+        path.join(REPO_ROOT, 'hosts', 'android', 'app', 'src', 'main'),
+        ['.kt', '.xml'],
+      ),
+    ].join('\n');
+
+    for (const id of ids) {
+      if (id.startsWith('tab-')) {
+        // The iOS shell computes tab ids as "tab-" + HostTab title lowercased
+        // (HostShellViewController), so the id is not a source literal; pin
+        // the title it derives from instead.
+        const title = id.slice('tab-'.length);
+        const capitalized = title.charAt(0).toUpperCase() + title.slice(1);
+        expect(haystack, `HostTab title for maestro id "${id}"`).toContain(
+          `return "${capitalized}"`,
+        );
+        continue;
+      }
+      expect(haystack, `maestro id "${id}" must exist in a source file`).toContain(`"${id}"`);
+    }
+  });
 });
 
 describe('Dockerfile server runtime matches package.json', () => {
