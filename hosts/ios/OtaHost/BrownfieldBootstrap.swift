@@ -1,6 +1,7 @@
 import Foundation
 import OtaGatewayLib
 import ReactBrownfield
+import UIKit
 
 /// Boots the React Native brownfield runtime and wires the OTA reload bridge.
 ///
@@ -32,9 +33,28 @@ enum BrownfieldBootstrap {
                 BrownfieldReloader.shared.reload()
             case let .saveState(key, stateJson):
                 HostStateStore.write(sliceKey: key, stateJson: stateJson)
+            case let .navigate(destination):
+                presentNativeDestination(destination)
             case .none:
                 break
             }
+        }
+    }
+
+    /// RN -> native navigation: present the requested native screen over
+    /// whatever is on screen (works above pushed RN surfaces too). Unknown
+    /// destinations are ignored. Presented modally, matching how the shell's
+    /// own Settings action presents it.
+    private static func presentNativeDestination(_ destination: String) {
+        guard destination == Brownfield.settingsDestination else { return }
+        DispatchQueue.main.async {
+            guard
+                let root = UIApplication.shared.connectedScenes
+                    .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
+                    .first?.rootViewController
+            else { return }
+            let navigation = UINavigationController(rootViewController: HostSettingsViewController())
+            (root.presentedViewController ?? root).present(navigation, animated: true)
         }
     }
 
@@ -56,6 +76,10 @@ enum BrownfieldBootstrap {
                   let stateJson = String(data: stateData, encoding: .utf8)
             else { return nil }
             return .saveState(key: key, stateJson: stateJson)
+        case Brownfield.navigateMessageType:
+            guard let destination = json["destination"] as? String, !destination.isEmpty
+            else { return nil }
+            return .navigate(destination: destination)
         default:
             return nil
         }

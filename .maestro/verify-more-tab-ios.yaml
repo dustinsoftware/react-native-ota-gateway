@@ -92,6 +92,20 @@ appId: dev.otagateway.host
     visible:
       id: "test-two-screen"
     timeout: 30000
+
+# RN -> native navigation: the RN button asks the HOST to present its native
+# Settings sheet over this RN surface (navigate message); Done returns to the
+# still-mounted RN screen.
+- tapOn:
+    id: "test-two-open-settings"
+- extendedWaitUntil:
+    visible:
+      id: "settings-done"
+    timeout: 15000
+- tapOn:
+    id: "settings-done"
+- assertVisible:
+    id: "test-two-screen"
 - tapOn: "More"
 - assertVisible: "Test 3"
 

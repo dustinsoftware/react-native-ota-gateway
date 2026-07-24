@@ -32,6 +32,7 @@ class OtaHostApplication : Application(), ReactApplication {
 
         BrownfieldReloadHandler.register()
         HostStateStore.register(this)
+        HostNavigationHandler.register(this)
     }
 
     /**

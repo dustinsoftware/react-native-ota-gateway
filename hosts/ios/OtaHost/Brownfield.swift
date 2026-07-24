@@ -24,6 +24,10 @@ enum Brownfield {
     /// Message `type` the JS side posts to checkpoint component state into the
     /// host's native store (see HostStateStore).
     static let saveStateMessageType = "saveState"
+    /// Message `type` the JS side posts to navigate INTO a native screen.
+    static let navigateMessageType = "navigate"
+    /// The `navigate` destination for the native Host Settings screen.
+    static let settingsDestination = "settings"
     /// Key of the initial property carrying the persisted component-state
     /// store into every mounted RN surface.
     static let savedStateKey = "savedStateJson"
@@ -78,6 +82,9 @@ enum BrownfieldMessage: Equatable {
     /// Checkpoints a component-state slice into the host's native store
     /// (HostStateStore); `stateJson` is the slice re-serialized as JSON.
     case saveState(key: String, stateJson: String)
+    /// Asks the host to navigate to a native screen (e.g. Test 2's "Open
+    /// native Settings" button) -- the reverse of the More tab pushing RN.
+    case navigate(destination: String)
 }
 
 /// The host's selected OTA environment, persisted to `UserDefaults`.

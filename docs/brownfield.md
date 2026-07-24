@@ -578,7 +578,22 @@ teardown or force-stop can outrun a final post) and a fresh mount resumes the
 decay from the saved values. Time is frozen while dismissed: switching tabs --
 or killing the process -- and returning finds the spinner coasting exactly
 where it was. `.maestro/verify-spinner-persistence-{ios,android}.yaml` pin
-both the tab-roundtrip and process-death resumes.
+both the tab-roundtrip and process-death resumes. The pushed Test 1 screen's
+counter uses the same seam from a pushed surface (reset row included so the
+flows stay idempotent).
+
+## RN -> native navigation (the navigate seam)
+
+The reverse of the More tab pushing RN screens: an RN screen can ask the HOST
+to open a native screen by posting
+`{ "type": "navigate", "destination": <name> }` over the message bridge
+(Test 2's "Open native Settings" button). `HostNavigationHandler.kt` starts
+the matching activity (application context + `FLAG_ACTIVITY_NEW_TASK`);
+`BrownfieldBootstrap.swift` presents the matching view controller modally over
+whatever is frontmost, pushed RN surfaces included. Only known destinations
+launch; anything else is ignored (the bridge is untrusted input). The More-tab
+Maestro flows cover the roundtrip: RN button -> native Settings -> dismiss ->
+the same still-mounted RN screen.
 
 ### Cleartext networking
 

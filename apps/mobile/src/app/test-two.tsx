@@ -2,6 +2,8 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { sendToNative } from '@/brownfield/message-bridge';
+import { isBrownfieldHost } from '@/brownfield/runtime';
 import { Colors, Spacing } from '@/constants/theme';
 
 /**
@@ -11,7 +13,10 @@ import { Colors, Spacing } from '@/constants/theme';
  * regression (a pushed surface rendering the previous surface's route) is
  * obvious at a glance. "Back inside React Native" pops the RN stack when Test 2
  * was reached from Test 1; native Back does the same via the brownfield back
- * integration.
+ * integration. "Open native Settings" navigates the OTHER way -- RN asks the
+ * HOST to present its native Settings screen over this RN surface (a
+ * `navigate` message over the brownfield bridge), closing the mix-and-match
+ * loop: native menu -> RN screen -> native screen.
  */
 export default function TestTwoScreen() {
   const router = useRouter();
@@ -27,6 +32,15 @@ export default function TestTwoScreen() {
           testID="test-two-back-rn"
         >
           <Text style={styles.buttonLabel}>Back inside React Native</Text>
+        </Pressable>
+      )}
+      {isBrownfieldHost() && (
+        <Pressable
+          style={styles.button}
+          onPress={() => sendToNative({ type: 'navigate', destination: 'settings' })}
+          testID="test-two-open-settings"
+        >
+          <Text style={styles.buttonLabel}>Open native Settings</Text>
         </Pressable>
       )}
     </View>
