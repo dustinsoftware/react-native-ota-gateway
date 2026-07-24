@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkpointHostState,
   readHostSavedState,
-  setHostSavedState,
+  hydrateHostSavedState,
 } from '../host-state';
 import { markBrownfieldHost } from '../runtime';
 
@@ -21,16 +21,22 @@ const { sendToNative } = await import('../message-bridge');
 describe('host-state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setHostSavedState(null);
+    hydrateHostSavedState(null);
   });
 
   it('reads back a slice from host-injected JSON', () => {
-    setHostSavedState('{"spinner":{"angle":1.5,"velocity":-3.2}}');
+    hydrateHostSavedState('{"spinner":{"angle":1.5,"velocity":-3.2}}');
     expect(readHostSavedState('spinner')).toEqual({ angle: 1.5, velocity: -3.2 });
   });
 
+  it('keeps slices independent (multiple keys hydrate and read back)', () => {
+    hydrateHostSavedState('{"spinner":{"angle":1},"test-one-counter":{"count":3}}');
+    expect(readHostSavedState('spinner')).toEqual({ angle: 1 });
+    expect(readHostSavedState('test-one-counter')).toEqual({ count: 3 });
+  });
+
   it('returns null for a missing slice', () => {
-    setHostSavedState('{"spinner":{"angle":1}}');
+    hydrateHostSavedState('{"spinner":{"angle":1}}');
     expect(readHostSavedState('other')).toBeNull();
   });
 
@@ -42,8 +48,8 @@ describe('host-state', () => {
     ['undefined', undefined],
     ['null', null],
   ])('treats %s as no saved state instead of crashing', (_label, json) => {
-    setHostSavedState('{"spinner":{"angle":1}}');
-    setHostSavedState(json as string | null | undefined);
+    hydrateHostSavedState('{"spinner":{"angle":1}}');
+    hydrateHostSavedState(json as string | null | undefined);
     expect(readHostSavedState('spinner')).toBeNull();
   });
 

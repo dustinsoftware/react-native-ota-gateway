@@ -18,6 +18,12 @@ enum HostStateStore {
     private static let defaultsKey = "OtaHostSavedState"
 
     /// Persist one slice (already-serialized JSON object string).
+    ///
+    /// NOTE: read-modify-write of the whole slice dictionary. Safe today
+    /// because brownfield `onMessage` delivery is serialized and only one RN
+    /// surface checkpoints at a time; if a second CONCURRENT writer ever
+    /// appears, wrap this in a serial queue or a sibling slice can be lost
+    /// (Android's per-key SharedPreferences write does not have this hazard).
     static func write(sliceKey: String, stateJson: String) {
         var slices = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
         slices[sliceKey] = stateJson

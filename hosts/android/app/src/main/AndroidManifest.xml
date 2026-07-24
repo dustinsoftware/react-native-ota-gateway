@@ -24,10 +24,13 @@
             </intent-filter>
         </activity>
 
+        <!-- singleTop: a double-tapped RN "Open native Settings" button posts
+             two navigate messages; dedup them like the pushed Test screens. -->
         <activity
             android:name=".HostSettingsActivity"
             android:exported="false"
             android:label="@string/settings_title"
+            android:launchMode="singleTop"
             android:parentActivityName=".RNHostActivity" />
 
         <!-- Pushed RN screen (More tab Test 1/2). A dedicated activity per RN

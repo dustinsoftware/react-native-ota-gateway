@@ -20,6 +20,8 @@ appId: dev.otagateway.host
     visible:
       id: "tab-developer"
     timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 10000
 - stopApp
 # The shell restores the persisted tab, so select Developer explicitly before
 # asserting the OTA marker (a previous run may have left the app on More).

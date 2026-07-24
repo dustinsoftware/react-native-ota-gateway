@@ -5,6 +5,8 @@ import {
   angularVelocityFromLinear,
   normalizeAngleDelta,
   pointerAngle,
+  clampVelocity,
+  decayVelocity,
 } from '../spinner-math';
 
 const HALF_PI = Math.PI / 2;
@@ -94,5 +96,36 @@ describe('angularVelocityFromLinear', () => {
 
   it('returns 0 at the exact center to avoid dividing by a zero radius', () => {
     expect(angularVelocityFromLinear(5, 5, 5, 5, 100, 100)).toBe(0);
+  });
+});
+
+describe('decayVelocity', () => {
+  it('halves the velocity after one half-life', () => {
+    // FRICTION=0.99999/ms has a ~69.3s half-life; assert the math, not the constant.
+    const halfLifeMs = Math.log(0.5) / Math.log(0.99999);
+    expect(decayVelocity(10, halfLifeMs, 0.99999)).toBeCloseTo(5, 5);
+  });
+
+  it('is frame-rate independent (two half-frames equal one full frame)', () => {
+    const oneStep = decayVelocity(10, 32, 0.999);
+    const twoSteps = decayVelocity(decayVelocity(10, 16, 0.999), 16, 0.999);
+    expect(twoSteps).toBeCloseTo(oneStep, 10);
+  });
+
+  it('preserves sign and leaves zero at zero', () => {
+    expect(decayVelocity(-10, 100, 0.999)).toBeLessThan(0);
+    expect(decayVelocity(0, 100, 0.999)).toBe(0);
+  });
+});
+
+describe('clampVelocity', () => {
+  it('passes through values inside the bound', () => {
+    expect(clampVelocity(12.5, 60)).toBe(12.5);
+    expect(clampVelocity(-12.5, 60)).toBe(-12.5);
+  });
+
+  it('clamps both signs to the bound (the tiny-radius release case)', () => {
+    expect(clampVelocity(50000, 60)).toBe(60);
+    expect(clampVelocity(-50000, 60)).toBe(-60);
   });
 });

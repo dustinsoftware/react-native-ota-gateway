@@ -8,6 +8,10 @@ appId: dev.otagateway.host
 - assertVisible:
     id: "test-one-screen"
 - assertVisible: "Taps: 2"
+# THE discriminator: "Taps" would survive even a recreation (host-state
+# restore), but the ephemeral session counter resets on any remount -- it can
+# only still read 2 if the surface truly survived the rotation in place.
+- assertVisible: "Session: 2"
 - tapOn:
     id: "test-one-counter"
 - assertVisible: "Taps: 3"

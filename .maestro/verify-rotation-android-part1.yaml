@@ -21,3 +21,8 @@ appId: dev.otagateway.host
 - tapOn:
     id: "test-one-counter"
 - assertVisible: "Taps: 2"
+# "Session: 2" is the in-place-survival discriminator for part 2: "Taps"
+# PERSISTS via the host-state seam, so a recreated surface would restore it
+# and look identical -- the session counter is ephemeral and resets on any
+# remount.
+- assertVisible: "Session: 2"

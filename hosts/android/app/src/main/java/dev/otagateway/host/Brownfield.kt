@@ -18,4 +18,20 @@ object Brownfield {
 
     /** RN route for the More tab's Test 2 pushed screen. */
     const val TEST_TWO_ROUTE = "/test-two"
+
+    /**
+     * Key of the initial property carrying the persisted component-state store
+     * into every mounted RN surface (shared contract with iOS and the JS
+     * host-state module).
+     */
+    const val SAVED_STATE_PROP = "savedStateJson"
+
+    /** Message `type` for component-state checkpoints (shared contract with iOS). */
+    const val SAVE_STATE_MESSAGE_TYPE = "saveState"
+
+    /** Message `type` for RN -> native navigation (shared contract with iOS). */
+    const val NAVIGATE_MESSAGE_TYPE = "navigate"
+
+    /** The `navigate` destination for the native Host Settings screen. */
+    const val SETTINGS_DESTINATION = "settings"
 }

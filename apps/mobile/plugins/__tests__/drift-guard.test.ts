@@ -134,6 +134,52 @@ describe('native host sources match the plugin coupling constants', () => {
   );
 });
 
+function sourcesUnder(dir: string, extensions: string[]): string {
+  return (readdirSync(dir, { recursive: true }) as string[])
+    .filter((f) => extensions.some((ext) => f.endsWith(ext)))
+    .map((f) => readFileSync(path.join(dir, f), 'utf8'))
+    .join('\n');
+}
+
+describe('brownfield message contract literals match across the three layers', () => {
+  // The message bridge couples JS, iOS, and Android by bare string literals
+  // (message `type`s, the navigate destination, and the savedStateJson
+  // initial-property key). A rename on one side builds green everywhere and
+  // the other layers simply stop matching at runtime -- the spinner silently
+  // stops persisting, or navigate goes dead. Pin each literal to all three.
+  const CONTRACT_LITERALS = ['saveState', 'navigate', 'settings', 'savedStateJson', 'reload'] as const;
+
+  function layerSources(): Array<[string, string]> {
+    return [
+      ['JS', sourcesUnder(path.join(APP_ROOT, 'src'), ['.ts', '.tsx'])],
+      ['iOS', sourcesUnder(path.join(REPO_ROOT, 'hosts', 'ios', 'OtaHost'), ['.swift'])],
+      [
+        'Android',
+        sourcesUnder(
+          path.join(REPO_ROOT, 'hosts', 'android', 'app', 'src', 'main', 'java'),
+          ['.kt'],
+        ),
+      ],
+    ];
+  }
+
+  it.each(CONTRACT_LITERALS)('"%s" appears in JS, iOS, and Android sources', (literal) => {
+    // Native layers must carry the QUOTED literal (a comment mention cannot
+    // satisfy the pin). The JS side also accepts a property access/declaration
+    // (`props.savedStateJson`, `savedStateJson?:`) -- initial-property keys are
+    // identifiers there, never string literals.
+    const quoted = new RegExp(`['"]${literal}['"]`);
+    const jsUsage = new RegExp(`['".]${literal}\\b|${literal}\\?:`);
+    for (const [layer, sources] of layerSources()) {
+      const pattern = layer === 'JS' ? jsUsage : quoted;
+      expect(
+        pattern.test(sources),
+        `"${literal}" missing from the ${layer} layer`,
+      ).toBe(true);
+    }
+  });
+});
+
 describe('Maestro flows reference selectors that exist in the sources', () => {
   // The .maestro flows are the only automated coverage for the host shells'
   // More tab, and their id selectors couple to RN testIDs and native
@@ -141,13 +187,6 @@ describe('Maestro flows reference selectors that exist in the sources', () => {
   // drift this suite exists to catch. A renamed testID builds green and only
   // fails on-device; this pins each id to some source literal at PR time.
   const MAESTRO_DIR = path.join(REPO_ROOT, '.maestro');
-
-  function sourcesUnder(dir: string, extensions: string[]): string {
-    return (readdirSync(dir, { recursive: true }) as string[])
-      .filter((f) => extensions.some((ext) => f.endsWith(ext)))
-      .map((f) => readFileSync(path.join(dir, f), 'utf8'))
-      .join('\n');
-  }
 
   const flows = readdirSync(MAESTRO_DIR).filter((f) => f.endsWith('.yaml'));
 

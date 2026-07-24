@@ -102,8 +102,13 @@ change only (pass a different URL); no RN code changes.
 The native tab selection is the navigation state being demonstrated. The RN
 tab bar is hidden in brownfield mode, and the host passes `/developer`, `/sky`,
 or `/spinner` when it creates the one active surface. Route-local RN state is
-discarded on a native tab change. Host-only environment, Metro, and relaunch
-controls live behind the Developer tab's native Settings action.
+discarded on a native tab change unless a component opts into the host-state
+seam, which round-trips its state through the host's native store (the fidget
+spinner's coast and the Test 1 counter survive tab changes and process death;
+see [brownfield.md](./brownfield.md)). RN screens can also navigate INTO
+native screens over the message bridge (the navigate seam, same doc).
+Host-only environment, Metro, and relaunch controls live behind the Developer
+tab's native Settings action.
 
 Both server instances read the **same** `dist/` export. The only difference is
 `OTA_ENVIRONMENT`, which flips (a) the gateway host stamped into the served

@@ -20,15 +20,13 @@ import org.json.JSONObject
  */
 object HostNavigationHandler {
     private const val TAG = "HostNavigation"
-    private const val NAVIGATE_MESSAGE_TYPE = "navigate"
-    private const val DESTINATION_SETTINGS = "settings"
 
     fun register(context: Context) {
         val appContext = context.applicationContext
         ReactNativeBrownfield.shared.addMessageListener(
             OnMessageListener { message ->
                 when (parseDestination(message)) {
-                    DESTINATION_SETTINGS ->
+                    Brownfield.SETTINGS_DESTINATION ->
                         // Launched from the application context (the bridge has
                         // no Activity); NEW_TASK is required for that, and the
                         // settings activity lands on the existing task's stack.
@@ -45,7 +43,7 @@ object HostNavigationHandler {
     private fun parseDestination(message: String): String? =
         try {
             val json = JSONObject(message)
-            if (json.optString("type") == NAVIGATE_MESSAGE_TYPE) {
+            if (json.optString("type") == Brownfield.NAVIGATE_MESSAGE_TYPE) {
                 json.optString("destination").takeIf(String::isNotEmpty)
             } else {
                 null

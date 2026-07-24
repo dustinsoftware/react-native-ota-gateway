@@ -12,6 +12,8 @@ import { Colors } from '@/constants/theme';
 import {
   accumulateAngle,
   angularVelocityFromLinear,
+  clampVelocity,
+  decayVelocity,
   pointerAngle,
 } from '@/components/spinner-math';
 
@@ -28,7 +30,7 @@ import {
  * Under a brownfield host the spinner PERSISTS its motion in the host's
  * native store (src/brownfield/host-state.ts): a frame callback measures the
  * live angular velocity, a throttled interval checkpoints {angle, velocity},
- * and a fresh mount resumes the decay from the saved values -- so switching
+ * and a fresh mount resumes the coast from the saved values -- so switching
  * native tabs (or even killing the process) and coming back finds the spinner
  * coasting exactly where it was dismissed. Time does not advance while the
  * surface is unmounted: the state is frozen at the last checkpoint.
@@ -72,7 +74,7 @@ export function FidgetSpinner({ onSample }: { onSample?: (sample: SpinnerSample)
   const rotation = useSharedValue(saved?.angle ?? 0);
   // Inertial velocity while coasting (finger up). The frame callback owns the
   // integration; a drag sets it on release and zeroes it on touch-down.
-  const coastVelocity = useSharedValue(saved?.velocity ?? 0);
+  const coastVelocity = useSharedValue(clampVelocity(saved?.velocity ?? 0, MAX_VELOCITY));
   const liveVelocity = useSharedValue(0);
   const frameRotation = useSharedValue(saved?.angle ?? 0);
   const centerX = useSharedValue(SPINNER_SIZE / 2);
@@ -91,7 +93,7 @@ export function FidgetSpinner({ onSample }: { onSample?: (sample: SpinnerSample)
     if (dt !== null && dt > 0) {
       if (Math.abs(coastVelocity.value) > IDLE_VELOCITY) {
         rotation.value += (coastVelocity.value * dt) / 1000;
-        coastVelocity.value *= Math.pow(FRICTION, dt);
+        coastVelocity.value = decayVelocity(coastVelocity.value, dt, FRICTION);
       } else if (coastVelocity.value !== 0) {
         coastVelocity.value = 0;
       }
@@ -111,8 +113,11 @@ export function FidgetSpinner({ onSample }: { onSample?: (sample: SpinnerSample)
     const id = setInterval(() => {
       const velocity = liveVelocity.value;
       const spinning = Math.abs(velocity) > IDLE_VELOCITY;
-      onSample?.({ spinning, velocity });
+      // Sample and checkpoint only while moving (plus the one stop
+      // transition): an idle spinner should neither re-render its read-out at
+      // 2.5Hz forever nor spam identical checkpoints.
       if (spinning || wasSpinning.current) {
+        onSample?.({ spinning, velocity });
         checkpointHostState(STATE_KEY, {
           angle: rotation.value,
           velocity: spinning ? velocity : 0,
@@ -152,7 +157,7 @@ export function FidgetSpinner({ onSample }: { onSample?: (sample: SpinnerSample)
         event.velocityX,
         event.velocityY,
       );
-      coastVelocity.value = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, velocity));
+      coastVelocity.value = clampVelocity(velocity, MAX_VELOCITY);
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -175,7 +180,8 @@ export function FidgetSpinner({ onSample }: { onSample?: (sample: SpinnerSample)
         onLayout={onLayout}
         style={[styles.touchArea, { width: SPINNER_SIZE, height: SPINNER_SIZE }]}
         accessibilityRole="image"
-        accessibilityLabel="Decorative fidget spinner">
+        accessibilityLabel="Decorative fidget spinner"
+        testID="fidget-spinner">
         <Animated.View style={[styles.body, { width: size, height: size }, animatedStyle]}>
           {lobes.map((lobe) => (
             <View

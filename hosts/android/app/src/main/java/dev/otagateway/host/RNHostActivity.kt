@@ -110,7 +110,7 @@ class RNHostActivity : AppCompatActivity() {
                     "initialUrl" to routePath,
                     // Persisted component state (host-state seam); lets a
                     // remounted surface resume e.g. the spinner mid-coast.
-                    "savedStateJson" to HostStateStore.readAllJson(this),
+                    Brownfield.SAVED_STATE_PROP to HostStateStore.readAllJson(this),
                 ),
             )
             supportFragmentManager.beginTransaction()

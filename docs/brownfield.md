@@ -569,7 +569,7 @@ the HOST's native store using the brownfield library's two native channels:
   `HostStateStore.swift` (UserDefaults, routed via `BrownfieldBootstrap`).
 - **Native -> RN:** every mounted RN surface (shell tabs AND pushed screens)
   receives the whole store as the `savedStateJson` initial property; the
-  brownfield entry hands it to `setHostSavedState` before the first screen
+  brownfield entry hands it to `hydrateHostSavedState` before the first screen
   renders, and components read their slice back with `readHostSavedState`.
 
 The fidget spinner is the reference user: it checkpoints `{angle, velocity}`
@@ -591,9 +591,11 @@ to open a native screen by posting
 the matching activity (application context + `FLAG_ACTIVITY_NEW_TASK`);
 `BrownfieldBootstrap.swift` presents the matching view controller modally over
 whatever is frontmost, pushed RN surfaces included. Only known destinations
-launch; anything else is ignored (the bridge is untrusted input). The More-tab
-Maestro flows cover the roundtrip: RN button -> native Settings -> dismiss ->
-the same still-mounted RN screen.
+launch; anything else is ignored (the bridge is untrusted input), and a
+double-tapped button is deduped on both platforms (the settings activity is
+`singleTop`; iOS skips the present while anything is already presented). The
+More-tab Maestro flows cover the roundtrip: RN button -> native Settings ->
+dismiss -> the same still-mounted RN screen.
 
 ### Cleartext networking
 

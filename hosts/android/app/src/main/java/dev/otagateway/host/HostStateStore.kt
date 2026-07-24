@@ -25,7 +25,6 @@ import org.json.JSONObject
 object HostStateStore {
     private const val TAG = "HostStateStore"
     private const val NAME = "dev.otagateway.host.state"
-    private const val SAVE_STATE_MESSAGE_TYPE = "saveState"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
@@ -64,7 +63,7 @@ object HostStateStore {
     private fun parseSaveState(message: String): Pair<String, String>? =
         try {
             val json = JSONObject(message)
-            val key = json.optString("type").takeIf { it == SAVE_STATE_MESSAGE_TYPE }
+            val key = json.optString("type").takeIf { it == Brownfield.SAVE_STATE_MESSAGE_TYPE }
                 ?.let { json.optString("key").takeIf(String::isNotEmpty) }
             val state = json.optJSONObject("state")
             if (key != null && state != null) key to state.toString() else null

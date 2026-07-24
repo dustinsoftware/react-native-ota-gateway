@@ -21,7 +21,7 @@ appId: dev.otagateway.host
       id: "bundle-marker"
     timeout: 60000
 - waitForAnimationToEnd:
-    timeout: 5000
+    timeout: 10000
 - stopApp
 - launchApp
 - tapOn: "Spinner"
@@ -29,6 +29,15 @@ appId: dev.otagateway.host
     visible:
       id: "spinner-state"
     timeout: 60000
+
+# Stop any residual persisted coast first (a tap zeroes the inertia), so the
+# "spinning" assert below can only be satisfied by THIS run's swipe -- without
+# this, leftover state from a previous run could mask a dead gesture.
+- tapOn:
+    id: "fidget-spinner"
+- extendedWaitUntil:
+    visible: "idle"
+    timeout: 5000
 
 # Spin it: a fast VERTICAL swipe down a chord left of the spinner's hub. The
 # start point must land on the spinner's touch area on both platforms (its

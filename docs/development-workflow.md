@@ -42,9 +42,10 @@ The unit suites cover the config plugins' pure transforms (run against the real
 API route, `generate-update-manifest.mjs`, the server's static-mount topology,
 `app.config` gateway resolution and iOS `MARKETING_VERSION` stamping, the App
 Store versioning gate script (macOS-only; skipped on the Linux CI runner), the
-brownfield bridge/runtime, and a drift guard that pins the cross-layer coupling
-constants (plugin constants vs `app.json` vs the native host sources and the
-Android AAR coordinate).
+brownfield bridge/runtime and host-state store client, the spinner physics
+helpers, and a drift guard that pins the cross-layer coupling constants
+(plugin constants vs `app.json` vs the native host sources, the Android AAR
+coordinate, the message-contract literals, and every Maestro id selector).
 
 Both server instances run `tsx server/index.ts` from `apps/mobile` (so
 `process.cwd()` is `apps/mobile`, where the manifest route reads
@@ -163,15 +164,27 @@ artifact and the OTA flow.
 Switching Mode A <-> Mode B is just swapping which framework/toggle is active
 (rebuild + reinstall on iOS; flip the toggle on Android) -- no app code changes.
 
-The hosts' **More tab** (native Test menu -> pushed RN/native screens; see
-[brownfield.md](./brownfield.md)) has Maestro flows covering the mix-and-match
-matrix on both platforms: `.maestro/verify-more-tab-ios.yaml` and
-`.maestro/verify-more-tab-android.yaml`. Run them as part of Mode B
-verification (`maestro test <flow>`; pass `--device <udid>` when both a
-simulator and an emulator are connected). NOTE: a fresh export is picked up on
-the SECOND app launch (expo-updates downloads in the background and applies on
-relaunch) -- cycle the app once after `docker compose up --build -d` or the
-flows assert against the previous bundle (`/test-one` unmatched).
+The hosts have a Maestro suite covering the mix-and-match matrix (see
+[brownfield.md](./brownfield.md)); run it as part of Mode B verification
+(`maestro test <flow>`; pass `--device <udid>` when both a simulator and an
+emulator are connected). **Order matters after a fresh export**: expo-updates
+downloads the new bundle in the background on the first launch and applies it
+on the second, so the SELF-WARMING flows (which launch/settle/relaunch) must
+run before the ones marked `no self-warm cycle`:
+
+1. `verify-more-tab-{ios,android}.yaml` -- self-warming; pushed RN/native
+   screens, persisted counter, RN->native Settings, double-visit back, 3x
+   tab-cycle stress.
+2. `verify-spinner-persistence-{ios,android}.yaml` -- self-warming; spin ->
+   tab roundtrip resumes -> process death resumes.
+3. `verify-spinner-survives-push-{ios,android}.yaml` -- spinner coast survives
+   a pushed-screen detour (independent state slices).
+4. `verify-double-tap-{ios,android}.yaml` -- menu-row double taps open one
+   screen, not two.
+5. Android only: `./.maestro/run-rotation-android.sh` -- orchestrates
+   `verify-rotation-android-part{1,2}.yaml` around an adb rotation (Maestro
+   cannot rotate); the ephemeral "Session" counter is the in-place-survival
+   discriminator.
 
 ## The canonical runbook
 

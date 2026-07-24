@@ -22,7 +22,10 @@ artifacts and own a four-item native tab bar (Developer, Sky, Spinner, More).
 Each host keeps at most one RN surface mounted at a time and passes the selected
 route as `initialUrl`, demonstrating that the host owns navigation state. The
 More tab is fully native: a Test menu whose rows push RN and native screens on
-one back stack (the mix-and-match demo). Host-only OTA
+one back stack (the mix-and-match demo). Components can opt into HOST-side
+state persistence -- the fidget spinner keeps coasting across tab switches and
+process death -- and RN screens can navigate into native screens over the
+message bridge. Host-only OTA
 environment and Metro controls live behind the Developer tab's native Settings
 action.
 

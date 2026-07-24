@@ -14,7 +14,7 @@ import { isBrownfieldHost } from './runtime';
  *    UserDefaults (iOS).
  *  - native -> RN: the host injects the WHOLE store as the `savedStateJson`
  *    initial property on every surface it mounts; the brownfield entry
- *    (entry.tsx) hands it to `setHostSavedState` before any screen renders,
+ *    (entry.tsx) hands it to `hydrateHostSavedState` before any screen renders,
  *    and components read their slice back with `readHostSavedState`.
  *
  * State must be JSON-serializable and is fire-and-forget: components should
@@ -26,7 +26,7 @@ import { isBrownfieldHost } from './runtime';
 let savedState: Record<string, unknown> = {};
 
 /** Called by the brownfield entry with the host-injected `savedStateJson`. */
-export function setHostSavedState(json: string | null | undefined): void {
+export function hydrateHostSavedState(json: string | null | undefined): void {
   if (!json) {
     savedState = {};
     return;

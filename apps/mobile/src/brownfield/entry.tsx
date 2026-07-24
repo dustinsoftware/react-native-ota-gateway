@@ -6,7 +6,7 @@ import { ExpoRoot } from 'expo-router';
 import { useState } from 'react';
 import { AppRegistry } from 'react-native';
 
-import { setHostSavedState } from './host-state';
+import { hydrateHostSavedState } from './host-state';
 import { freshRouteContext, markBrownfieldHost } from './runtime';
 
 const ctx = require.context('../app');
@@ -21,11 +21,11 @@ function App() {
 // screen's navigation state on Android -- see freshRouteContext. The useState
 // is load-bearing twice over: inlining freshRouteContext(ctx) in render would
 // mint a new identity every render and reset the router's state mid-session,
-// and setHostSavedState must run before the first child render so screens
+// and hydrateHostSavedState must run before the first child render so screens
 // read their saved slice on mount.
 function BrownfieldApp(props: { initialUrl?: string; savedStateJson?: string }) {
   const [context] = useState(() => {
-    setHostSavedState(props.savedStateJson);
+    hydrateHostSavedState(props.savedStateJson);
     return freshRouteContext(ctx);
   });
   return <ExpoRoot context={context} location={props.initialUrl} />;

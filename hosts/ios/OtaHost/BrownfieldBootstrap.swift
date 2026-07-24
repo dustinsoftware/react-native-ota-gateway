@@ -44,17 +44,21 @@ enum BrownfieldBootstrap {
     /// RN -> native navigation: present the requested native screen over
     /// whatever is on screen (works above pushed RN surfaces too). Unknown
     /// destinations are ignored. Presented modally, matching how the shell's
-    /// own Settings action presents it.
+    /// own Settings action presents it. Skipped while ANYTHING is already
+    /// presented: a double-tapped RN button posts two navigate messages, and
+    /// without the guard the second stacks a second sheet (the same dedup
+    /// contract singleTop gives the Android settings activity).
     private static func presentNativeDestination(_ destination: String) {
         guard destination == Brownfield.settingsDestination else { return }
         DispatchQueue.main.async {
             guard
                 let root = UIApplication.shared.connectedScenes
                     .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
-                    .first?.rootViewController
+                    .first?.rootViewController,
+                root.presentedViewController == nil
             else { return }
             let navigation = UINavigationController(rootViewController: HostSettingsViewController())
-            (root.presentedViewController ?? root).present(navigation, animated: true)
+            root.present(navigation, animated: true)
         }
     }
 

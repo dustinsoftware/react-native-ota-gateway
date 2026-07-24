@@ -23,8 +23,13 @@ export default function TestOneScreen() {
   const [count, setCount] = useState(
     () => readHostSavedState<{ count: number }>(STATE_KEY)?.count ?? 0,
   );
+  // DELIBERATELY not persisted: because "Taps" restores from the host store on
+  // any remount, it can no longer distinguish "surface survived in place" from
+  // "surface recreated and restored". The session counter resets to 0 on any
+  // remount, so it is the discriminator the rotation flow asserts on.
+  const [sessionCount, setSessionCount] = useState(0);
 
-  function update(next: number) {
+  function persist(next: number) {
     setCount(next);
     checkpointHostState(STATE_KEY, { count: next });
   }
@@ -33,10 +38,20 @@ export default function TestOneScreen() {
     <View style={styles.root} testID="test-one-screen">
       <Text style={styles.title}>Test 1</Text>
       <Text style={styles.subtitle}>React Native screen, native header</Text>
-      <Pressable style={styles.button} onPress={() => update(count + 1)} testID="test-one-counter">
+      <Pressable
+        style={styles.button}
+        onPress={() => {
+          persist(count + 1);
+          setSessionCount((current) => current + 1);
+        }}
+        testID="test-one-counter"
+      >
         <Text style={styles.buttonLabel}>Taps: {count}</Text>
       </Pressable>
-      <Pressable onPress={() => update(0)} testID="test-one-reset">
+      <Text style={styles.session} testID="test-one-session">
+        Session: {sessionCount}
+      </Text>
+      <Pressable onPress={() => persist(0)} testID="test-one-reset">
         <Text style={styles.reset}>Reset</Text>
       </Pressable>
       <Link href="/test-two" style={styles.link} testID="test-one-link-test-two">
@@ -73,6 +88,11 @@ const styles = StyleSheet.create({
     color: Colors.dark.text,
     fontSize: 18,
     fontWeight: '600',
+  },
+  session: {
+    color: Colors.dark.textSecondary,
+    fontSize: 14,
+    fontVariant: ['tabular-nums'],
   },
   reset: {
     color: Colors.dark.textSecondary,
