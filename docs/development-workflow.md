@@ -181,7 +181,10 @@ run before the ones marked `no self-warm cycle`:
    a pushed-screen detour (independent state slices).
 4. `verify-double-tap-{ios,android}.yaml` -- menu-row double taps open one
    screen, not two.
-5. Android only: `./.maestro/run-rotation-android.sh` -- orchestrates
+5. iOS only: `verify-reload-while-pushed-ios.yaml` -- a manual RN reload with
+   a pushed RN screen on the stack pops to root and re-mounts the tab (the
+   pushed surface predates the restarted runtime).
+6. Android only: `./.maestro/run-rotation-android.sh` -- orchestrates
    `verify-rotation-android-part{1,2}.yaml` around an adb rotation (Maestro
    cannot rotate); the ephemeral "Session" counter is the in-place-survival
    discriminator.
