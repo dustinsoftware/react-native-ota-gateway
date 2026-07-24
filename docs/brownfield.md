@@ -671,3 +671,5 @@ not just physical devices. See [development-workflow.md](./development-workflow.
   per-environment update-URL wiring.
 - [development-workflow.md](./development-workflow.md) -- building and running the
   hosts, Mode A/B steps.
+- [version-skew.md](./version-skew.md) -- how the bridge/state contracts must
+  tolerate a JS bundle and host binary at different versions.

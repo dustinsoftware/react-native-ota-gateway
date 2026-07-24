@@ -207,3 +207,7 @@ re-export, Check -> Download -> Restart, watch it change to `v2` with
 - [brownfield.md](./brownfield.md) -- how the host rebuilds the RN root on a
   reload message, and how expo-updates config is overridden per environment.
 - [architecture.md](./architecture.md) -- where the servers sit in the system.
+- [version-skew.md](./version-skew.md) -- what happens when the JS bundle and
+  the host binary are at different versions: current freeze/fail-open
+  behavior, and the (design-only) conditional-fallback and update-required
+  strategies.
