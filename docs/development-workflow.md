@@ -30,14 +30,21 @@ root with `pnpm`; native builds run from the host directories.
 - `pnpm typecheck` -- `tsc --noEmit` over `apps/mobile`.
 - `pnpm test` -- the Vitest unit suites (`vitest run`). Both root scripts
   delegate to `@ota-gateway/mobile`; the same two commands are the CI merge gate
-  (`.github/workflows/ci.yml`).
+  (`.github/workflows/ci.yml`). A second, **manual-only** workflow
+  (`.github/workflows/ios-framework-verify.yml`, `workflow_dispatch`) packages
+  the Release iOS frameworks on a macOS runner and runs the App Store
+  versioning gate -- dispatch it before merging a packaging-affecting change
+  (see [brownfield.md](./brownfield.md)); it never runs automatically because
+  an RN-from-source iOS build takes 1-2 hours of runner time.
 
 The unit suites cover the config plugins' pure transforms (run against the real
 `@callstack/react-native-brownfield` templates in `node_modules`), the manifest
 API route, `generate-update-manifest.mjs`, the server's static-mount topology,
-`app.config` gateway resolution, the brownfield bridge/runtime, and a drift
-guard that pins the cross-layer coupling constants (plugin constants vs
-`app.json` vs the native host sources and the Android AAR coordinate).
+`app.config` gateway resolution and iOS `MARKETING_VERSION` stamping, the App
+Store versioning gate script (macOS-only; skipped on the Linux CI runner), the
+brownfield bridge/runtime, and a drift guard that pins the cross-layer coupling
+constants (plugin constants vs `app.json` vs the native host sources and the
+Android AAR coordinate).
 
 Both server instances run `tsx server/index.ts` from `apps/mobile` (so
 `process.cwd()` is `apps/mobile`, where the manifest route reads

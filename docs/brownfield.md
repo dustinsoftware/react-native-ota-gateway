@@ -50,6 +50,34 @@ A thin wrapper around `brownfield package:ios --scheme OtaGatewayLib
   invalidates the code signature and yields a `CODESIGNING "Invalid Page"` crash
   instead. (`hermesvm.xcframework` already ships `@rpath`; `ReactBrownfield` is a
   stripped interface archive with no install name.)
+- **Verifies framework versioning** (App Store gate): fails the package if any
+  `OtaGatewayLib.framework` slice's `Info.plist` is missing
+  `CFBundleShortVersionString` / `CFBundleVersion`, or carries a version that
+  does not match `app.json`'s `expo.version`. App Store uploads reject a host
+  IPA whose embedded framework lacks `CFBundleShortVersionString`
+  (ITMS-90057). The value comes from `MARKETING_VERSION`, which `app.config.ts`
+  stamps into the `@callstack/react-native-brownfield` plugin's
+  `ios.buildSettings` from `expo.version` -- the same source as the Android AAR
+  coordinate. Without the stamp, the plugin's `Info.plist` template references
+  `$(MARKETING_VERSION)` with no build setting defined and Xcode drops the key.
+  The plugin only writes build settings when it CREATES the target, and the
+  CLI's internal `expo prebuild` is not clean (only `pnpm prebuild` deletes
+  `ios/`) -- the value-match check is what catches a stale `ios/` still stamped
+  with a pre-bump version. On a gate failure, run
+  `pnpm --filter @ota-gateway/mobile prebuild --ios` (or delete
+  `apps/mobile/ios/`) and rerun. The gate itself lives in
+  `scripts/verify-ios-framework-version.sh` (called by `package-ios.sh`) so its
+  failure branches are unit-tested against fixture plists
+  (`scripts/__tests__/verify-ios-framework-version.test.ts`; macOS-only -- it
+  uses `PlistBuddy` -- so the Linux CI merge gate skips it).
+
+  The same package + gate can be run in CI on demand (never automatically): the
+  manual-only `iOS Framework Verify` workflow
+  (`.github/workflows/ios-framework-verify.yml`, `workflow_dispatch`) packages
+  Release on a macOS runner and uploads the xcframeworks as an artifact --
+  dispatch it on a PR branch before merging a packaging-affecting change, or on
+  `main`. Never make it automatic: an RN-from-source iOS build costs 1-2 hours
+  of macOS runner time.
 - **Copies `Expo.plist`** (expo-updates config) into the package output. The CLI
   does not. Verify the slug-derived source path after the first prebuild
   (expected `ios/otagatewayapp/Supporting/Expo.plist`).

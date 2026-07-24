@@ -55,6 +55,13 @@ by flipping a setting (this is the key iOS-vs-Android difference).
    `NSAllowsLocalNetworking` in `Info.plist`.
 7. Check for a stray Metro before starting one: `lsof -i :8081 -i :3000 -i :3001`.
    A Metro from another checkout on `:8081` silently feeds the host the wrong bundle.
+8. `package-ios.sh` ends with an App Store versioning gate on every
+   configuration, Debug included -- the packaged `OtaGatewayLib.framework` must
+   carry `CFBundleShortVersionString` matching `app.json`'s `expo.version`
+   (ITMS-90057 class). On a gate failure the generated `ios/` dir is stale:
+   run `pnpm --filter @ota-gateway/mobile prebuild --ios` (or delete
+   `apps/mobile/ios/`) and repackage. See `docs/brownfield.md` ->
+   "iOS: scripts/package-ios.sh".
 
 ## Mode B -- release artifact + OTA flow (do this first)
 

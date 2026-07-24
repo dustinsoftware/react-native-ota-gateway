@@ -59,12 +59,68 @@ export function resolveGateway(urls: GatewayUrls): string {
   return process.env.OTA_ENVIRONMENT === 'development' ? urls.development : urls.production;
 }
 
+const BROWNFIELD_PLUGIN = '@callstack/react-native-brownfield';
+
+/**
+ * Inject MARKETING_VERSION into the @callstack/react-native-brownfield
+ * plugin's ios.buildSettings. The plugin's Info.plist template sets
+ * CFBundleShortVersionString to $(MARKETING_VERSION) but never defines that
+ * build setting, so Xcode drops the key from the built framework's Info.plist
+ * and App Store uploads reject any host IPA embedding it (ITMS-90057). The
+ * value is app.json's expo.version -- the same source that stamps the Android
+ * AAR coordinate (./plugins/withBrownfieldAndroidPublishing.js). buildSettings
+ * is the plugin's supported passthrough and only applies to the generated
+ * OtaGatewayLib target.
+ *
+ * NOTE: the plugin writes build settings only when it CREATES the target, so a
+ * stale generated ios/ dir keeps its old value -- the brownfield CLI's internal
+ * `expo prebuild` is not clean (only `pnpm prebuild` deletes ios/), which is
+ * why scripts/package-ios.sh verifies the packaged framework's version MATCHES
+ * app.json rather than merely existing.
+ *
+ * Named inject* (the repo's pure-transform convention, like the
+ * injectSwift/KotlinUpdates helpers), not with* (reserved for config plugins):
+ * this cannot be a plugins/ config plugin because it rewrites the options
+ * BOUND TO another plugin before Expo consumes the plugins array, which only
+ * the dynamic config function can do. The Android AAR version stamp lives in
+ * plugins/withBrownfieldAndroidPublishing.js instead because it must rewrite a
+ * brownfield-GENERATED gradle file after the fact.
+ */
+export function injectIosMarketingVersion(
+  plugins: ExpoConfig['plugins'],
+  marketingVersion: string | null | undefined,
+): ExpoConfig['plugins'] {
+  if (!plugins || !marketingVersion) return plugins;
+  return plugins.map((entry) => {
+    if (!Array.isArray(entry) || entry[0] !== BROWNFIELD_PLUGIN) return entry;
+    const options = (entry[1] ?? {}) as { ios?: { buildSettings?: Record<string, unknown> } };
+    return [
+      entry[0],
+      {
+        ...options,
+        ios: {
+          ...options.ios,
+          buildSettings: {
+            ...options.ios?.buildSettings,
+            MARKETING_VERSION: marketingVersion,
+          },
+        },
+      },
+    ];
+  });
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => {
   const gatewayUrls = readGatewayUrls(config);
   const gateway = resolveGateway(gatewayUrls);
 
   return {
     ...config,
+    // Stamps the brownfield framework's CFBundleShortVersionString (App Store
+    // gate, see injectIosMarketingVersion above). config.version is app.json's
+    // expo.version; when absent the stamp is skipped and package-ios.sh fails
+    // the package instead of shipping a version-less framework.
+    plugins: injectIosMarketingVersion(config.plugins, config.version),
     name: config.name ?? 'ota-gateway-app',
     slug: config.slug ?? 'ota-gateway-app',
     updates: {
