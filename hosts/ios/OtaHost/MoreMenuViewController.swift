@@ -33,7 +33,12 @@ final class MoreMenuViewController: UIViewController, UITableViewDataSource, UIT
     static func makeReactNativeTestScreen(route: String, title: String) -> UIViewController {
         BrownfieldReloader.shared.makeViewController(
             moduleName: Brownfield.moduleName,
-            initialProperties: [Brownfield.initialUrlKey: route],
+            initialProperties: [
+                Brownfield.initialUrlKey: route,
+                // Persisted component state (host-state seam), matching the
+                // shell's tab surfaces.
+                Brownfield.savedStateKey: HostStateStore.readAllJson(),
+            ],
             title: title
         )
     }

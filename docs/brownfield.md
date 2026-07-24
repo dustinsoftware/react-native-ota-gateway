@@ -555,6 +555,31 @@ handling for a pushed `RNScreenActivity` during an OTA reload:
 `BrownfieldReloadHandler` relaunches the shared `ReactHost` in place, so a
 pushed RN fragment re-renders on the live runtime where it stands.
 
+## Persisted component state (the host-state seam)
+
+Brownfield hosts tear an RN surface down whenever it is dismissed, so in-JS
+component state dies with it. The host-state seam round-trips state through
+the HOST's native store using the brownfield library's two native channels:
+
+- **RN -> native:** a component checkpoints its slice with
+  `checkpointHostState(key, state)` (`src/brownfield/host-state.ts`), which
+  posts `{ "type": "saveState", "key": ..., "state": {...} }` over the message
+  bridge. The hosts persist each slice -- `HostStateStore.kt`
+  (SharedPreferences, registered in `OtaHostApplication`) and
+  `HostStateStore.swift` (UserDefaults, routed via `BrownfieldBootstrap`).
+- **Native -> RN:** every mounted RN surface (shell tabs AND pushed screens)
+  receives the whole store as the `savedStateJson` initial property; the
+  brownfield entry hands it to `setHostSavedState` before the first screen
+  renders, and components read their slice back with `readHostSavedState`.
+
+The fidget spinner is the reference user: it checkpoints `{angle, velocity}`
+on a 400ms interval while in motion (continuous, NOT an unmount hook -- a
+teardown or force-stop can outrun a final post) and a fresh mount resumes the
+decay from the saved values. Time is frozen while dismissed: switching tabs --
+or killing the process -- and returning finds the spinner coasting exactly
+where it was. `.maestro/verify-spinner-persistence-{ios,android}.yaml` pin
+both the tab-roundtrip and process-death resumes.
+
 ### Cleartext networking
 
 `res/xml/network_security_config.xml` must permit **cleartext for `localhost`,

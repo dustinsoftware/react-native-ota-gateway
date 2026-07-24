@@ -30,6 +30,8 @@ enum BrownfieldBootstrap {
             switch parseMessage(message) {
             case .reload:
                 BrownfieldReloader.shared.reload()
+            case let .saveState(key, stateJson):
+                HostStateStore.write(sliceKey: key, stateJson: stateJson)
             case .none:
                 break
             }
@@ -47,6 +49,13 @@ enum BrownfieldBootstrap {
         switch type {
         case Brownfield.reloadMessageType:
             return .reload
+        case Brownfield.saveStateMessageType:
+            guard let key = json["key"] as? String, !key.isEmpty,
+                  let state = json["state"] as? [String: Any],
+                  let stateData = try? JSONSerialization.data(withJSONObject: state),
+                  let stateJson = String(data: stateData, encoding: .utf8)
+            else { return nil }
+            return .saveState(key: key, stateJson: stateJson)
         default:
             return nil
         }

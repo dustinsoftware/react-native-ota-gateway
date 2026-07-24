@@ -21,6 +21,12 @@ enum Brownfield {
     static let testTwoRoute = "/test-two"
     /// Message `type` the JS side posts after an OTA update download.
     static let reloadMessageType = "reload"
+    /// Message `type` the JS side posts to checkpoint component state into the
+    /// host's native store (see HostStateStore).
+    static let saveStateMessageType = "saveState"
+    /// Key of the initial property carrying the persisted component-state
+    /// store into every mounted RN surface.
+    static let savedStateKey = "savedStateJson"
 }
 
 /// A native host tab. RN tabs (`route != nil`) mount exactly one RN surface at
@@ -69,6 +75,9 @@ enum BrownfieldMessage: Equatable {
     /// Posted after an OTA update is downloaded, asking the host to rebuild the
     /// RN screens so the freshly-downloaded bundle is loaded.
     case reload
+    /// Checkpoints a component-state slice into the host's native store
+    /// (HostStateStore); `stateJson` is the slice re-serialized as JSON.
+    case saveState(key: String, stateJson: String)
 }
 
 /// The host's selected OTA environment, persisted to `UserDefaults`.

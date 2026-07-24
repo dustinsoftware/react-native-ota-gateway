@@ -129,7 +129,12 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
 
         let controller = BrownfieldReloader.shared.makeViewController(
             moduleName: Brownfield.moduleName,
-            initialProperties: [Brownfield.initialUrlKey: route],
+            initialProperties: [
+                Brownfield.initialUrlKey: route,
+                // Persisted component state (host-state seam); lets a
+                // remounted surface resume e.g. the spinner mid-coast.
+                Brownfield.savedStateKey: HostStateStore.readAllJson(),
+            ],
             title: tab.title
         )
         embedSurface(controller)

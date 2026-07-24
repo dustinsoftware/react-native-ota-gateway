@@ -106,7 +106,12 @@ class RNHostActivity : AppCompatActivity() {
         } else if (supportFragmentManager.findFragmentById(container.id) == null) {
             val fragment = ReactNativeFragment.createReactNativeFragment(
                 Brownfield.RN_MODULE_NAME,
-                bundleOf("initialUrl" to routePath),
+                bundleOf(
+                    "initialUrl" to routePath,
+                    // Persisted component state (host-state seam); lets a
+                    // remounted surface resume e.g. the spinner mid-coast.
+                    "savedStateJson" to HostStateStore.readAllJson(this),
+                ),
             )
             supportFragmentManager.beginTransaction()
                 .replace(container.id, fragment)

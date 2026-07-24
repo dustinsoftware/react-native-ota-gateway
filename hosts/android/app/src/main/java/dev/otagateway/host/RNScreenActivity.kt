@@ -42,7 +42,12 @@ class RNScreenActivity : AppCompatActivity() {
         if (supportFragmentManager.findFragmentById(container.id) == null) {
             val fragment = ReactNativeFragment.createReactNativeFragment(
                 Brownfield.RN_MODULE_NAME,
-                bundleOf("initialUrl" to route),
+                bundleOf(
+                    "initialUrl" to route,
+                    // Persisted component state (host-state seam), matching
+                    // the shell's tab surfaces.
+                    "savedStateJson" to HostStateStore.readAllJson(this),
+                ),
             )
             supportFragmentManager.beginTransaction()
                 .replace(container.id, fragment)

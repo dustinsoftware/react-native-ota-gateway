@@ -1,0 +1,64 @@
+# Verifies the host-state persistence seam on Android: spin the fidget
+# spinner, switch native tabs (which tears the RN surface down and recreates
+# the activity), come back -- the spinner must STILL be coasting, resumed from
+# the state checkpointed into SharedPreferences over the brownfield message
+# bridge. Then the harder variant: force-stop the process and relaunch -- the
+# persisted tab restores Spinner and the coast resumes across process death.
+#
+# Timing note: friction is near-zero (velocity halves roughly every 70s while
+# visible, and is frozen while dismissed), so none of these steps race the
+# decay.
+appId: dev.otagateway.host
+---
+# Self-warm so the flow runs the freshly-exported bundle: expo-updates
+# downloads it in the background on the first launch and applies it on the
+# second. Wait for RN to fully boot and give the download time to land before
+# the stop, or the relaunch still runs the old bundle.
+- launchApp
+- tapOn: "Developer"
+- extendedWaitUntil:
+    visible:
+      id: "bundle-marker"
+    timeout: 60000
+- waitForAnimationToEnd:
+    timeout: 5000
+- stopApp
+- launchApp
+- tapOn: "Spinner"
+- extendedWaitUntil:
+    visible:
+      id: "spinner-state"
+    timeout: 60000
+
+# Spin it: a fast VERTICAL swipe down a chord left of the spinner's hub. The
+# start point must land on the spinner's touch area on both platforms (its
+# center sits at ~43% of the screen on the Android host and ~48% on iOS), and
+# an off-center chord is what gives the drag angular leverage -- a swipe
+# through the hub imparts nothing.
+- swipe:
+    start: "40%, 38%"
+    end: "40%, 54%"
+    duration: 200
+- extendedWaitUntil:
+    visible: "spinning"
+    timeout: 5000
+
+# Tab roundtrip: Sky tears the spinner surface down (activity recreate);
+# returning must resume the coast from the native store.
+- tapOn: "Sky"
+- tapOn: "Spinner"
+- extendedWaitUntil:
+    visible:
+      id: "spinner-state"
+    timeout: 30000
+- assertVisible: "spinning"
+
+# Process death: force-stop + relaunch. The persisted tab restores Spinner and
+# the coast resumes from the last checkpoint.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "spinner-state"
+    timeout: 60000
+- assertVisible: "spinning"

@@ -9,7 +9,13 @@ export type RNToNativeMessage =
   // Asks the native host to reload the React Native root. Used in place of
   // expo-updates' reloadAsync(), which crashes in a brownfield app because the
   // native host (not expo-updates) owns the RN view lifecycle.
-  | { type: 'reload' };
+  | { type: 'reload' }
+  // Checkpoints a piece of RN component state into the HOST's native store
+  // (SharedPreferences / UserDefaults). The host injects the whole store back
+  // as the `savedStateJson` initial property on every RN surface it mounts, so
+  // a dismissed component resumes exactly where it left off (see
+  // src/brownfield/host-state.ts).
+  | { type: 'saveState'; key: string; state: Record<string, unknown> };
 
 // -- Native -> RN messages ---------------------------------------------------
 
