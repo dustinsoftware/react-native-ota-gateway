@@ -1,0 +1,25 @@
+# Edge case: a rapid DOUBLE TAP on a More menu row must open the pushed screen
+# once, not stack it twice (Android dedup: RNScreenActivity's singleTop launch
+# mode). One Back from the screen must land straight on the menu -- if the
+# screen stacked twice, the first Back reveals the duplicate and the menu
+# assertion fails.
+# NOTE: no self-warm cycle -- run after any warming flow when a fresh export
+# was just deployed in Mode B.
+appId: dev.otagateway.host
+---
+- launchApp
+- tapOn: "More"
+- assertVisible: "Test 1"
+- doubleTapOn: "Test 1"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 60000
+- pressKey: back
+- assertVisible: "Test 3"
+
+# Same dedup for the native Test 3 screen (also singleTop).
+- doubleTapOn: "Test 3"
+- assertVisible: "Push RN Test 1"
+- pressKey: back
+- assertVisible: "Test 2"

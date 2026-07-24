@@ -1,0 +1,28 @@
+# Edge case: a rapid DOUBLE TAP on a More menu row must open the pushed screen
+# once, not stack it twice (iOS dedup: MoreMenuViewController only pushes while
+# the shell is still top of the navigation stack). One back from the screen
+# must land straight on the menu -- if the screen stacked twice, the first back
+# reveals the duplicate and the menu assertion fails.
+# NOTE: no self-warm cycle -- run after any warming flow when a fresh export
+# was just deployed in Mode B.
+appId: dev.otagateway.host
+---
+- launchApp
+- tapOn:
+    id: "tab-more"
+- assertVisible: "Test 1"
+- doubleTapOn:
+    id: "item-test-one"
+- extendedWaitUntil:
+    visible:
+      id: "test-one-screen"
+    timeout: 60000
+- tapOn: "More"
+- assertVisible: "Test 3"
+
+# Same dedup for the native Test 3 screen.
+- doubleTapOn:
+    id: "item-test-three"
+- assertVisible: "Push RN Test 1"
+- tapOn: "More"
+- assertVisible: "Test 2"

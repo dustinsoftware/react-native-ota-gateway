@@ -76,6 +76,13 @@ final class MoreMenuViewController: UIViewController, UITableViewDataSource, UIT
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        navigationController?.pushViewController(rows[indexPath.row].makeViewController(), animated: true)
+        // Double-tap guard: a rapid second tap fires didSelect again before the
+        // push transition completes, which would stack the screen twice. Only
+        // push while the SHELL (this menu's parent) is still top of the stack
+        // -- the Android side gets the same dedup from singleTop.
+        guard let navigation = navigationController, navigation.topViewController === parent else {
+            return
+        }
+        navigation.pushViewController(rows[indexPath.row].makeViewController(), animated: true)
     }
 }
