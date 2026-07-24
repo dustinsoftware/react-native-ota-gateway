@@ -2,11 +2,6 @@ package dev.otagateway.host
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
-import com.callstack.reactnativebrownfield.OnMessageListener
-import com.callstack.reactnativebrownfield.ReactNativeBrownfield
-import org.json.JSONException
-import org.json.JSONObject
 
 /**
  * Lets React Native navigate INTO native screens. The RN side posts
@@ -19,37 +14,18 @@ import org.json.JSONObject
  * untrusted input source, matching the other handlers).
  */
 object HostNavigationHandler {
-    private const val TAG = "HostNavigation"
-
-    fun register(context: Context) {
-        val appContext = context.applicationContext
-        ReactNativeBrownfield.shared.addMessageListener(
-            OnMessageListener { message ->
-                when (parseDestination(message)) {
-                    Brownfield.SETTINGS_DESTINATION ->
-                        // Launched from the application context (the bridge has
-                        // no Activity); NEW_TASK is required for that, and the
-                        // settings activity lands on the existing task's stack.
-                        appContext.startActivity(
-                            Intent(appContext, HostSettingsActivity::class.java)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    else -> Unit
-                }
-            },
-        )
-    }
-
-    private fun parseDestination(message: String): String? =
-        try {
-            val json = JSONObject(message)
-            if (json.optString("type") == Brownfield.NAVIGATE_MESSAGE_TYPE) {
-                json.optString("destination").takeIf(String::isNotEmpty)
-            } else {
-                null
-            }
-        } catch (e: JSONException) {
-            Log.d(TAG, "Ignoring malformed brownfield message", e)
-            null
+    /** Invoked by [BrownfieldMessageDispatcher] for a parsed navigate message. */
+    fun open(context: Context, destination: String) {
+        when (destination) {
+            Brownfield.SETTINGS_DESTINATION ->
+                // Launched from the application context (the bridge has no
+                // Activity); NEW_TASK is required for that, and the settings
+                // activity lands on the existing task's stack.
+                context.startActivity(
+                    Intent(context, HostSettingsActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            else -> Unit
         }
+    }
 }

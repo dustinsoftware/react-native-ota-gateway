@@ -2,8 +2,6 @@ package dev.otagateway.host
 
 import android.content.Context
 import android.util.Log
-import com.callstack.reactnativebrownfield.OnMessageListener
-import com.callstack.reactnativebrownfield.ReactNativeBrownfield
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -25,26 +23,32 @@ import org.json.JSONObject
 object HostStateStore {
     private const val TAG = "HostStateStore"
     private const val NAME = "dev.otagateway.host.state"
+    private const val MAX_SLICE_BYTES = 16 * 1024
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
-    /** Subscribes to the brownfield bridge and persists saveState messages. */
-    fun register(context: Context) {
-        val appContext = context.applicationContext
-        ReactNativeBrownfield.shared.addMessageListener(
-            OnMessageListener { message ->
-                parseSaveState(message)?.let { (key, stateJson) ->
-                    // commit() (synchronous), NOT apply(): surviving process
-                    // death is this store's whole point, and a force-stop can
-                    // drop apply()'s asynchronously-flushed write -- the
-                    // spinner then resumes idle after a kill. The listener
-                    // runs off the main thread, so the blocking write is fine.
-                    @Suppress("ApplySharedPref")
-                    prefs(appContext).edit().putString(key, stateJson).commit()
-                }
-            },
-        )
+    /**
+     * Persist one slice (invoked by [BrownfieldMessageDispatcher] for a parsed
+     * saveState message).
+     *
+     * commit() (synchronous), NOT apply(): surviving process death is this
+     * store's whole point, and a force-stop can drop apply()'s
+     * asynchronously-flushed write -- the spinner then resumes idle after a
+     * kill. The bridge listener runs off the main thread, so the blocking
+     * write is fine.
+     */
+    fun write(context: Context, key: String, stateJson: String) {
+        // Size cap mirroring the JS-side guard (host-state.ts): the whole
+        // store is injected into every mounted surface, so oversized slices
+        // are dropped rather than stored. The secret-name denylist lives on
+        // the JS side (the contract's enforcement point).
+        if (stateJson.length > MAX_SLICE_BYTES) {
+            Log.w(TAG, "Dropping oversized saved-state slice '$key' (${stateJson.length} bytes)")
+            return
+        }
+        @Suppress("ApplySharedPref")
+        prefs(context).edit().putString(key, stateJson).commit()
     }
 
     /** The whole store as a JSON object of slices: `{"spinner": {...}, ...}`. */
@@ -61,20 +65,4 @@ object HostStateStore {
         return all.toString()
     }
 
-    /**
-     * Extracts (key, state-JSON) from a raw bridge message, or null if it is
-     * not a well-formed saveState message. The bridge is an untrusted input
-     * source: anything malformed is ignored, matching BrownfieldReloadHandler.
-     */
-    private fun parseSaveState(message: String): Pair<String, String>? =
-        try {
-            val json = JSONObject(message)
-            val key = json.optString("type").takeIf { it == Brownfield.SAVE_STATE_MESSAGE_TYPE }
-                ?.let { json.optString("key").takeIf(String::isNotEmpty) }
-            val state = json.optJSONObject("state")
-            if (key != null && state != null) key to state.toString() else null
-        } catch (e: JSONException) {
-            Log.d(TAG, "Ignoring malformed brownfield message", e)
-            null
-        }
 }

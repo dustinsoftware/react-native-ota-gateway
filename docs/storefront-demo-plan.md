@@ -9,10 +9,14 @@ mid-port in a real product app. Every feature below earns its place by
 stress-testing a seam, and the deliverable of each phase is as much the **gaps
 register** (§6) as the feature itself.
 
-Nothing in this document exists yet. When any part is implemented, move its
-description into the appropriate canonical doc (`brownfield.md`,
+Nothing in the FEATURE inventory exists yet. When any part is implemented,
+move its description into the appropriate canonical doc (`brownfield.md`,
 `ota-updates.md`, `configuration.md`, `version-skew.md`) and delete it from
-here -- this file should shrink toward zero as the plan is consumed.
+here -- this file should shrink toward zero as the plan is consumed. A first
+wave of prototype prerequisites has already landed (see the struck gaps in
+§6): the versioned manifest store with channel pointers, the single Android
+bridge dispatcher, host-state secret/size guards, per-tab navigation
+restoration, and the OTA journey-lock seam.
 
 ## 1. Why e-commerce
 
@@ -169,16 +173,16 @@ and strike it here.
 | G4 | **Push -> RN routing** -- a notification cannot open an RN surface | Phase 5 | host resolves the notification to a route and mounts/pushes with `initialUrl`; needs a route allow-list + cold-start ordering rules |
 | G5 | **External deep links into RN** -- host deep-link handlers know nothing of RN routes | Phase 1 | same route-resolution table as G4; one registry, two entry points |
 | G6 | **Cross-surface reactive state** -- a pushed PDP adds to cart; the shell's Cart tab badge is native and stale | Phase 2 | host-state is snapshot-at-mount by design; badges need a live channel: either bridge events the host listens to, or the host polls the cart service. Decide once, document the boundary between snapshot state and live state |
-| G7 | **OTA-safe funnels** -- `checkAutomatically: ALWAYS` + host-driven reload could reload mid-checkout | Phase 4 | a JS-side "journey lock": defer applying updates while a funnel is active; release on completion/abandon. Interacts with OtaGate and the reload message |
+| G7 | ~~OTA-safe funnels~~ **mechanism landed** (`src/utils/journey-lock.ts`: begin/endJourney + deferred reload, unit-tested) | Phase 4 | remaining: the checkout funnel actually consuming it (beginJourney on entry, endJourney on completion/abandon) |
 | G8 | **Native-module cadence** -- adding any RN native dependency (maps, mmkv, biometrics) changes the artifact ABI | Phase 6 | rehearsed procedure: add module -> bump `runtimeVersion` -> host re-pin -> skew freeze verified for old hosts (per `version-skew.md`); the demo should do this at least once ON PURPOSE |
-| G9 | **Secure-data boundaries** -- payment tokens/PII must never enter `savedStateJson` or logs | Phase 3 | a written rule + a drift-guard-style test that greps checkpointed slice shapes against a denylist; SecureStore-only paths for secrets |
-| G10 | **Form-draft persistence at scale** -- checkout drafts are bigger and more sensitive than a spinner slice | Phase 4 | per-slice schema version + TTL (already designed in `version-skew.md`), plus G9 filtering; measure the size ceiling of the initial-properties channel |
+| G9 | ~~Secure-data boundaries~~ **largely landed** (`checkpointHostState` refuses secret-shaped names + oversized slices, unit-tested; native writers cap size) | Phase 3 | remaining: SecureStore-only storage paths for actual secrets, and log hygiene |
+| G10 | **Form-draft persistence at scale** -- checkout drafts are bigger and more sensitive than a spinner slice | Phase 4 | per-slice schema version + TTL (nav-restore now demonstrates both), plus G9 filtering; the slice ceiling is set (16KB, enforced both sides) -- remaining: whole-store injection may need per-surface scoping as slices multiply |
 | G11 | **Capability advertisement** -- brightness boost, biometrics, share sheet vary by host version | Phase 6 | `hostCapabilities` from `version-skew.md` Part 2; the demo becomes its first consumer |
 | G12 | **Embedded native views vs detours** -- a map INSIDE an RN screen (vs a full-screen detour) means a native component in the artifact | Phase 6 | decide the policy: detours default, embedding only with an explicit ADR; if embedding, it exercises G8 |
 | G13 | **Localization/RTL** -- no i18n story exists; hosts and RN must agree on locale | Phase 7 | host injects locale at mount; RN owns strings; RTL snapshot flows in Maestro |
 | G14 | **Performance budgets** -- no TTI/frame-rate gates; catalog lists will find the ceiling | Phase 1 | measured budgets (cold TTI, list scroll frame drops) recorded per phase; regression = failed exit criteria |
 | G15 | **Offline mutation queue** -- optimistic writes need somewhere to live through a tunnel | Phase 7 | scope deliberately small: reads cache freely; queued writes only for idempotent, low-stakes mutations (wishlist), never money |
-| G16 | **Multi-update retention + rollout pointers** -- one-manifest storage can't do canary/rollback or per-host-floor serving | Phase 4+ | the channel-pointer manifest store sketched in `version-skew.md` Scenario C; checkout is when rollback stops being optional |
+| G16 | ~~Multi-update retention + rollout pointers~~ **landed** (storeVersion-2 store: retained updates, per-env channel pointers, `OTA_UPDATE_PIN`; see [ota-updates.md](./ota-updates.md)) | Phase 4+ | remaining: percentage rollouts (cohort bucketing) and per-host-floor (`minHostBuild`) selection |
 
 ## 7. Non-goals
 

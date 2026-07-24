@@ -16,8 +16,9 @@ import dev.otagateway.ReactNativeHostManager
  * - Mode B (default): the AAR's [ReactNativeHostManager], pointing expo-updates
  *   at the selected environment's OTA endpoint before the controller is created.
  *
- * The reload handler is registered afterward so a downloaded OTA update can be
- * applied in place.
+ * The bridge message dispatcher is registered afterward: one listener parses
+ * every RN -> native message and routes reload/saveState/navigate to their
+ * handlers.
  */
 class OtaHostApplication : Application(), ReactApplication {
 
@@ -30,9 +31,7 @@ class OtaHostApplication : Application(), ReactApplication {
             ReactNativeHostManager.initialize(this, DebugPrefs.environment(this), null)
         }
 
-        BrownfieldReloadHandler.register()
-        HostStateStore.register(this)
-        HostNavigationHandler.register(this)
+        BrownfieldMessageDispatcher.register(this)
     }
 
     /**

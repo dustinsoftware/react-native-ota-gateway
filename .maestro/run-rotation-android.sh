@@ -6,6 +6,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Target one device even when several are attached (adb honors ANDROID_SERIAL).
+export ANDROID_SERIAL="${MAESTRO_DEVICE:-emulator-5554}"
+
 restore() {
   adb shell settings put system user_rotation 0
   adb shell settings put system accelerometer_rotation 1

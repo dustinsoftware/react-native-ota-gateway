@@ -54,15 +54,24 @@ appId: dev.otagateway.host
 
 # Tab roundtrip: Sky tears the spinner surface down (activity recreate);
 # returning must resume the coast from the native store.
+#
+# The "spinning" waits are wrapped in retry because on this Maestro version
+# text-based extendedWaitUntil can abort after a single hierarchy poll (~1s)
+# instead of honoring its timeout -- id-based waits poll correctly. The retry
+# re-arms the wait so a slow RN boot (the readout flips "idle"->"spinning" a
+# couple of seconds after mount) doesn't fail the run.
 - tapOn: "Sky"
 - tapOn: "Spinner"
 - extendedWaitUntil:
     visible:
       id: "spinner-state"
     timeout: 30000
-- extendedWaitUntil:
-    visible: "spinning"
-    timeout: 15000
+- retry:
+    maxRetries: 3
+    commands:
+      - extendedWaitUntil:
+          visible: "spinning"
+          timeout: 15000
 
 # Process death: force-stop + relaunch. The persisted tab restores Spinner and
 # the coast resumes from the last checkpoint.
@@ -72,9 +81,13 @@ appId: dev.otagateway.host
     visible:
       id: "spinner-state"
     timeout: 60000
-# The resumed coast's first read-out sample lands within ~800ms, but a cold
-# start under CI-class machine load can stall emulator frames -- wait, don't
-# insta-assert.
-- extendedWaitUntil:
-    visible: "spinning"
-    timeout: 15000
+# The resumed coast's first read-out sample lands within ~800ms of the spinner
+# mounting, but a cold start under CI-class machine load can stall emulator
+# frames and JS effects for several seconds -- wait (with the retry re-arm
+# described above), don't insta-assert.
+- retry:
+    maxRetries: 3
+    commands:
+      - extendedWaitUntil:
+          visible: "spinning"
+          timeout: 15000

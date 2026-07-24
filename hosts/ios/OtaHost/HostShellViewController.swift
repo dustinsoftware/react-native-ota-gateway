@@ -134,6 +134,9 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
                 // Persisted component state (host-state seam); lets a
                 // remounted surface resume e.g. the spinner mid-coast.
                 Brownfield.savedStateKey: HostStateStore.readAllJson(),
+                // Tab surfaces resume their last in-surface path across tab
+                // switches; pushed screens deliberately do NOT set this.
+                Brownfield.restoreNavStateKey: true,
             ],
             title: tab.title
         )

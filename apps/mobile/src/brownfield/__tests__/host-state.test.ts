@@ -58,6 +58,57 @@ describe('host-state', () => {
     expect(sendToNative).not.toHaveBeenCalled();
   });
 
+  it('refuses checkpoints carrying secret-shaped keys or field names', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      markBrownfieldHost();
+      checkpointHostState('session-token', { value: 'x' });
+      checkpointHostState('draft', { nested: { cardNumber: '4111' } });
+      checkpointHostState('draft', { password: 'hunter2' });
+      expect(sendToNative).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses secrets nested inside arrays', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      markBrownfieldHost();
+      checkpointHostState('draft', { items: [{ cardNumber: '4111' }] });
+      expect(sendToNative).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses a cyclic state object instead of hanging or throwing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      markBrownfieldHost();
+      const cyclic: Record<string, unknown> = { value: 1 };
+      cyclic.self = cyclic;
+      expect(() => checkpointHostState('cyclic', cyclic)).not.toThrow();
+      expect(sendToNative).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('not JSON-serializable'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses oversized slices instead of bloating the injection channel', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      markBrownfieldHost();
+      checkpointHostState('big', { blob: 'x'.repeat(17 * 1024) });
+      expect(sendToNative).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('slice ceiling'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('posts a saveState message once running under a brownfield host', () => {
     // Module-global and deliberately one-way, like runtime.test.ts.
     markBrownfieldHost();

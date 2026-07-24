@@ -16,6 +16,7 @@ import Foundation
 /// slices are dropped on read (never propagated to a fresh surface).
 enum HostStateStore {
     private static let defaultsKey = "OtaHostSavedState"
+    private static let maxSliceBytes = 16 * 1024
 
     /// Persist one slice (already-serialized JSON object string).
     ///
@@ -25,6 +26,12 @@ enum HostStateStore {
     /// appears, wrap this in a serial queue or a sibling slice can be lost
     /// (Android's per-key SharedPreferences write does not have this hazard).
     static func write(sliceKey: String, stateJson: String) {
+        // Size cap mirroring the JS-side guard (host-state.ts); the
+        // secret-name denylist lives on the JS side.
+        guard stateJson.utf8.count <= maxSliceBytes else {
+            print("[HostStateStore] Dropping oversized saved-state slice \(sliceKey)")
+            return
+        }
         var slices = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
         slices[sliceKey] = stateJson
         UserDefaults.standard.set(slices, forKey: defaultsKey)

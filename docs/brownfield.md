@@ -484,12 +484,20 @@ Mirrors the generated `ReactNativeHostManager` but points RN at Metro:
 toggle selects; the runtime toggle works on Android because bundle resolution
 honors `useDevSupport` at runtime (no iOS-style constraint).
 
-### `BrownfieldReloadHandler.kt`
+### `BrownfieldMessageDispatcher.kt` (the single bridge listener)
 
-Subscribes to `onMessage`; on `type == "reload"` calls
-`UpdatesController.instance.relaunchReactApplicationForModule()`. (Log via
-`android.util.Log` -- no Timber dependency in the demo.) Android needs no
-`BrownfieldReloader` equivalent: relaunching the RN root here is enough.
+ONE `onMessage` listener parses every RN -> native message into a sealed
+`BrownfieldMessage` and dispatches: `reload` ->
+`BrownfieldReloadHandler.onReload()` (which calls
+`UpdatesController.instance.relaunchReactApplicationForModule()`; Android
+needs no `BrownfieldReloader` equivalent -- relaunching the RN root is
+enough), `saveState` -> `HostStateStore.write`, `navigate` ->
+`HostNavigationHandler.open`. Handlers hold no listeners and never re-parse.
+This mirrors iOS's `BrownfieldBootstrap.parseMessage` + switch and is the
+prerequisite for request/response correlation on the bridge (a future
+navigate-with-result envelope needs exactly one correlation point). Unknown
+and malformed messages are ignored on both platforms -- the skew guarantee
+(see [version-skew.md](./version-skew.md)).
 
 ### `RNHostActivity.kt` (launcher and native tab shell)
 
@@ -572,6 +580,12 @@ the HOST's native store using the brownfield library's two native channels:
   brownfield entry hands it to `hydrateHostSavedState` before the first screen
   renders, and components read their slice back with `readHostSavedState`.
 
+Checkpoints are GUARDED at the JS enforcement point (`checkpointHostState`):
+slices carrying secret-shaped key/field names (token, password, card, ...)
+are refused with a warning -- the store and the `savedStateJson` channel are
+not secret-grade storage -- and slices over 16KB are refused (persist an id
+and refetch instead). The native writers mirror the size cap.
+
 The fidget spinner is the reference user: it checkpoints `{angle, velocity}`
 on a 400ms interval while in motion (continuous, NOT an unmount hook -- a
 teardown or force-stop can outrun a final post) and a fresh mount resumes the
@@ -581,6 +595,16 @@ where it was. `.maestro/verify-spinner-persistence-{ios,android}.yaml` pin
 both the tab-roundtrip and process-death resumes. The pushed Test 1 screen's
 counter uses the same seam from a pushed surface (reset row included so the
 flows stay idempotent).
+
+**Per-tab navigation restoration** rides the same seam: tab mounts pass
+`restoreNavState: true` (pushed screens deliberately do not), the root
+layout's `NavStateGuard` checkpoints the surface's current path (slice
+`nav:<initialUrl>`, 30-minute TTL), and the brownfield entry mounts at the
+saved path instead of `initialUrl` (`src/brownfield/nav-restore.ts`). This
+softens freshRouteContext's reset-to-initialUrl trade-off for tabs holding
+deep in-surface navigation; only the PATH is restored (expo-router rebuilds
+the stack from the URL). `.maestro/verify-nav-restore-{ios,android}.yaml`
+pin the roundtrip.
 
 ## RN -> native navigation (the navigate seam)
 

@@ -52,7 +52,7 @@ Skew-tolerance already exists at the message bridge, by convention:
 
 - Both hosts parse bridge messages defensively and **ignore unknown or
   malformed types** (`BrownfieldBootstrap.parseMessage` returns nil;
-  the Android handlers return null). A newer bundle posting a message type an
+  Android's `BrownfieldMessageDispatcher.parseMessage` returns null). A newer bundle posting a message type an
   older host does not know is silently dropped -- degraded, not crashed.
 - Native -> RN messages cross a Zod boundary (schema in
   `src/brownfield/message-bridge.types.ts`, enforced by the `safeParse` guard
@@ -135,10 +135,11 @@ version.
 - Each exported update would carry a `minHostBuild` in the stored manifest
   (stamped at export time from a config field).
 - The route serves the **newest update whose `minHostBuild` <= the caller's
-  build** -- which requires retaining more than one update per runtime
-  version, i.e. the manifest store grows from "latest only" to a small
-  version-indexed set with channel pointers. (The same pointer machinery
-  enables percentage rollouts and instant rollback; design that once.)
+  build**. The storage half of this is NOW REAL: the manifest store retains a
+  version-indexed set of updates with per-environment channel pointers and an
+  `OTA_UPDATE_PIN` override (rollback/canary), per
+  [ota-updates.md](./ota-updates.md). What remains design-only here is the
+  `minHostBuild` field and the per-host-floor selection itself.
 - An old host then keeps *receiving updates* -- the newest ones compatible
   with it -- rather than freezing at whatever it had when the floor moved.
   Freezing (Part 1) remains the behavior only when no compatible update

@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -20,6 +20,7 @@ import { Colors, Spacing } from '@/constants/theme';
 const STATE_KEY = 'test-one-counter';
 
 export default function TestOneScreen() {
+  const router = useRouter();
   const [count, setCount] = useState(
     () => readHostSavedState<{ count: number }>(STATE_KEY)?.count ?? 0,
   );
@@ -57,6 +58,23 @@ export default function TestOneScreen() {
       <Link href="/test-two" style={styles.link} testID="test-one-link-test-two">
         Open Test 2 inside React Native
       </Link>
+      <Pressable
+        onPress={() => {
+          // A RESTORED tab surface mounts AT this path with no stack behind
+          // it (nav-restore restores the path, not history), so back must
+          // fall back to replacing to the Developer tab root -- which also
+          // re-checkpoints the tab's nav slice to its root for the next
+          // mount. Pushed mounts (More tab) still pop normally.
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace('/developer');
+          }
+        }}
+        testID="test-one-back-rn"
+      >
+        <Text style={styles.reset}>Back inside React Native</Text>
+      </Pressable>
     </View>
   );
 }

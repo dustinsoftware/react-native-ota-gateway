@@ -111,6 +111,10 @@ class RNHostActivity : AppCompatActivity() {
                     // Persisted component state (host-state seam); lets a
                     // remounted surface resume e.g. the spinner mid-coast.
                     Brownfield.SAVED_STATE_PROP to HostStateStore.readAllJson(this),
+                    // Tab surfaces resume their last in-surface path across
+                    // the recreate-per-tab-switch model; pushed screens
+                    // (RNScreenActivity) deliberately do NOT set this.
+                    Brownfield.RESTORE_NAV_STATE_PROP to true,
                 ),
             )
             supportFragmentManager.beginTransaction()

@@ -1,5 +1,6 @@
 import * as Updates from 'expo-updates';
 import React, { useState } from 'react';
+import { Link } from 'expo-router';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -93,6 +94,13 @@ export default function DeveloperScreen() {
         />
 
         {status ? <Text style={styles.status}>{status}</Text> : null}
+
+        {/* In-surface navigation demo: under a host tab that opted into
+            restoreNavState, leaving via this link and returning to the tab
+            resumes HERE (see src/brownfield/nav-restore.ts). */}
+        <Link href="/test-one" style={styles.inlineLink} testID="developer-link-test-one">
+          Open Test 1 in this surface
+        </Link>
       </ScrollView>
     </View>
   );
@@ -178,5 +186,11 @@ const styles = StyleSheet.create({
   },
   status: {
     color: Colors.dark.textSecondary,
+  },
+  inlineLink: {
+    color: Colors.dark.accent,
+    fontSize: 14,
+    textDecorationLine: 'underline',
+    marginTop: 12,
   },
 });

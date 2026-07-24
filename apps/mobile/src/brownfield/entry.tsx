@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { AppRegistry } from 'react-native';
 
 import { hydrateHostSavedState } from './host-state';
+import { configureNavRestore, resolveInitialLocation } from './nav-restore';
 import { freshRouteContext, markBrownfieldHost } from './runtime';
 
 const ctx = require.context('../app');
@@ -23,12 +24,22 @@ function App() {
 // mint a new identity every render and reset the router's state mid-session,
 // and hydrateHostSavedState must run before the first child render so screens
 // read their saved slice on mount.
-function BrownfieldApp(props: { initialUrl?: string; savedStateJson?: string }) {
-  const [context] = useState(() => {
+function BrownfieldApp(props: {
+  initialUrl?: string;
+  savedStateJson?: string;
+  restoreNavState?: boolean;
+}) {
+  const [state] = useState(() => {
     hydrateHostSavedState(props.savedStateJson);
-    return freshRouteContext(ctx);
+    // Tab surfaces opt in to resuming their last in-surface path (pushed
+    // screens stay fresh-by-design); must run AFTER hydration, before render.
+    configureNavRestore(props.initialUrl, props.restoreNavState === true);
+    return {
+      context: freshRouteContext(ctx),
+      location: resolveInitialLocation(props.initialUrl),
+    };
   });
-  return <ExpoRoot context={context} location={props.initialUrl} />;
+  return <ExpoRoot context={state.context} location={state.location} />;
 }
 
 // Brownfield module name -- native host app mounts this key. Mark the runtime

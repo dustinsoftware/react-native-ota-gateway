@@ -83,6 +83,7 @@ Toggle **off** (the default). Metro need not run.
    docs/development-workflow.md): `verify-more-tab-android.yaml`,
    `verify-spinner-persistence-android.yaml`,
    `verify-spinner-survives-push-android.yaml`, `verify-double-tap-android.yaml`,
+   `verify-nav-restore-android.yaml`,
    then `./.maestro/run-rotation-android.sh` (rotation via adb between parts).
 3. OTA flow: **Check for update** -> **Download** -> **Restart** (the brownfield
    reload relaunches the RN root; no process kill).

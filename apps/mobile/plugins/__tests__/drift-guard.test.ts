@@ -147,7 +147,7 @@ describe('brownfield message contract literals match across the three layers', (
   // initial-property key). A rename on one side builds green everywhere and
   // the other layers simply stop matching at runtime -- the spinner silently
   // stops persisting, or navigate goes dead. Pin each literal to all three.
-  const CONTRACT_LITERALS = ['saveState', 'navigate', 'settings', 'savedStateJson', 'reload'] as const;
+  const CONTRACT_LITERALS = ['saveState', 'navigate', 'settings', 'savedStateJson', 'restoreNavState', 'reload'] as const;
 
   function layerSources(): Array<[string, string]> {
     return [

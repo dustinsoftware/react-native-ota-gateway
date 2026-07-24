@@ -93,7 +93,8 @@ in by `package-ios.sh`. `-derivedDataPath build` pins the `.app` output path so
 - The Maestro suite passes, in the documented order (self-warming flows first;
   see docs/development-workflow.md): `verify-more-tab-ios.yaml`,
   `verify-spinner-persistence-ios.yaml`, `verify-spinner-survives-push-ios.yaml`,
-  `verify-double-tap-ios.yaml`, `verify-reload-while-pushed-ios.yaml`
+  `verify-double-tap-ios.yaml`, `verify-nav-restore-ios.yaml`,
+  `verify-reload-while-pushed-ios.yaml`
   (`maestro --device <udid> test .maestro/<flow>`).
 
 ### OTA delivery proof (the DONE demo)

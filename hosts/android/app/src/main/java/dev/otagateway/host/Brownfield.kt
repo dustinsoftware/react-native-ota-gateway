@@ -26,6 +26,15 @@ object Brownfield {
      */
     const val SAVED_STATE_PROP = "savedStateJson"
 
+    /**
+     * Initial property opting a surface into resuming its last in-surface
+     * path (tab mounts only; shared contract with iOS and nav-restore.ts).
+     */
+    const val RESTORE_NAV_STATE_PROP = "restoreNavState"
+
+    /** Message `type` the JS posts after an OTA download (shared contract with iOS). */
+    const val RELOAD_MESSAGE_TYPE = "reload"
+
     /** Message `type` for component-state checkpoints (shared contract with iOS). */
     const val SAVE_STATE_MESSAGE_TYPE = "saveState"
 

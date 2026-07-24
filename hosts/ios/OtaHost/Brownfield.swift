@@ -31,6 +31,9 @@ enum Brownfield {
     /// Key of the initial property carrying the persisted component-state
     /// store into every mounted RN surface.
     static let savedStateKey = "savedStateJson"
+    /// Initial property opting a surface into resuming its last in-surface
+    /// path (tab mounts only; shared contract with Android and nav-restore.ts).
+    static let restoreNavStateKey = "restoreNavState"
 }
 
 /// A native host tab. RN tabs (`route != nil`) mount exactly one RN surface at

@@ -42,7 +42,8 @@ The unit suites cover the config plugins' pure transforms (run against the real
 API route, `generate-update-manifest.mjs`, the server's static-mount topology,
 `app.config` gateway resolution and iOS `MARKETING_VERSION` stamping, the App
 Store versioning gate script (macOS-only; skipped on the Linux CI runner), the
-brownfield bridge/runtime and host-state store client, the spinner physics
+brownfield bridge/runtime, the host-state store client (including the
+secret/size checkpoint guards), the OTA journey lock, the spinner physics
 helpers, and a drift guard that pins the cross-layer coupling constants
 (plugin constants vs `app.json` vs the native host sources, the Android AAR
 coordinate, the message-contract literals, and every Maestro id selector).
@@ -181,10 +182,12 @@ run before the ones marked `no self-warm cycle`:
    a pushed-screen detour (independent state slices).
 4. `verify-double-tap-{ios,android}.yaml` -- menu-row double taps open one
    screen, not two.
-5. iOS only: `verify-reload-while-pushed-ios.yaml` -- a manual RN reload with
+5. `verify-nav-restore-{ios,android}.yaml` -- a tab surface resumes its last
+   in-surface path after a tab roundtrip (the nav-restore seam).
+6. iOS only: `verify-reload-while-pushed-ios.yaml` -- a manual RN reload with
    a pushed RN screen on the stack pops to root and re-mounts the tab (the
    pushed surface predates the restarted runtime).
-6. Android only: `./.maestro/run-rotation-android.sh` -- orchestrates
+7. Android only: `./.maestro/run-rotation-android.sh` -- orchestrates
    `verify-rotation-android-part{1,2}.yaml` around an adb rotation (Maestro
    cannot rotate); the ephemeral "Session" counter is the in-place-survival
    discriminator.
