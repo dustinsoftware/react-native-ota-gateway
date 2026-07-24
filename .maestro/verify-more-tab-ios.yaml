@@ -38,13 +38,17 @@ appId: dev.otagateway.host
 - assertVisible: "Test 2"
 - assertVisible: "Test 3"
 
-# Visit 1: RN Test 1 pushed on the nav stack. Counter proves live RN state.
+# Visit 1: RN Test 1 pushed on the nav stack. Reset first (the counter
+# PERSISTS via the host-state seam, so a previous run's value may be showing),
+# then prove live RN state.
 - tapOn:
     id: "item-test-one"
 - extendedWaitUntil:
     visible:
       id: "test-one-screen"
     timeout: 30000
+- tapOn:
+    id: "test-one-reset"
 - assertVisible: "Taps: 0"
 - tapOn:
     id: "test-one-counter"
@@ -65,14 +69,18 @@ appId: dev.otagateway.host
 - tapOn: "More"
 - assertVisible: "Test 3"
 
-# Visit 2: a second push must render and close cleanly, with a fresh counter
-# (no state bleed from visit 1's mount).
+# Visit 2: a second push must render and close cleanly. The counter shows the
+# PERSISTED value from visit 1 (the host-state seam round-trip), then is reset
+# to leave the store clean for the next run.
 - tapOn:
     id: "item-test-one"
 - extendedWaitUntil:
     visible:
       id: "test-one-screen"
     timeout: 30000
+- assertVisible: "Taps: 1"
+- tapOn:
+    id: "test-one-reset"
 - assertVisible: "Taps: 0"
 - tapOn: "More"
 - assertVisible: "Test 3"

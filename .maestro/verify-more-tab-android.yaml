@@ -33,12 +33,16 @@ appId: dev.otagateway.host
 - assertVisible: "Test 2"
 - assertVisible: "Test 3"
 
-# Visit 1: RN Test 1 pushed with native toolbar. Counter proves live RN state.
+# Visit 1: RN Test 1 pushed with native toolbar. Reset first (the counter
+# PERSISTS via the host-state seam, so a previous run's value may be showing),
+# then prove live RN state.
 - tapOn: "Test 1"
 - extendedWaitUntil:
     visible:
       id: "test-one-screen"
     timeout: 30000
+- tapOn:
+    id: "test-one-reset"
 - assertVisible: "Taps: 0"
 - tapOn:
     id: "test-one-counter"
@@ -60,13 +64,17 @@ appId: dev.otagateway.host
 - assertVisible: "Test 3"
 
 # Visit 2 (the double-visit regression): a fresh activity means a fresh back
-# dispatcher -- hardware Back must still close the screen. The counter must be
-# fresh too (no state bleed from visit 1's mount).
+# dispatcher -- hardware Back must still close the screen. The counter shows
+# the PERSISTED value from visit 1 (the host-state seam round-trip), then is
+# reset to leave the store clean for the next run.
 - tapOn: "Test 1"
 - extendedWaitUntil:
     visible:
       id: "test-one-screen"
     timeout: 30000
+- assertVisible: "Taps: 1"
+- tapOn:
+    id: "test-one-reset"
 - assertVisible: "Taps: 0"
 - pressKey: back
 - assertVisible: "Test 3"
