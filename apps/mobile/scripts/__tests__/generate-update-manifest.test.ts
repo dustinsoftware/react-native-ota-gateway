@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -97,18 +97,31 @@ function runScript(cwd: string, env: Record<string, string> = {}): void {
   execFileSync(process.execPath, [SCRIPT], { cwd, env: base, stdio: 'pipe' });
 }
 
-interface StoredManifest {
+interface StoredUpdate {
+  key: string;
   otaAppVersion: string;
   gatewayPlaceholder?: string;
   gatewayUrls?: { development?: string; production?: string };
+  files?: string[];
   ios: PlatformManifest;
   android: PlatformManifest;
 }
 
-function readStoredManifest(cwd: string): StoredManifest {
+interface UpdateStore {
+  storeVersion: number;
+  channels: { development?: string; production?: string };
+  updates: StoredUpdate[];
+}
+
+function readStore(cwd: string): UpdateStore {
   return JSON.parse(
     readFileSync(path.join(cwd, 'dist', 'server', 'update-manifest.json'), 'utf-8'),
-  ) as StoredManifest;
+  ) as UpdateStore;
+}
+
+/** The newest update entry -- what a fresh export just wrote. */
+function readStoredManifest(cwd: string): StoredUpdate {
+  return readStore(cwd).updates[0];
 }
 
 describe('generate-update-manifest.mjs', () => {
@@ -118,12 +131,16 @@ describe('generate-update-manifest.mjs', () => {
       runScript(dir, BUILD_ENV);
       const stored = readStoredManifest(dir);
       const ios = stored.ios;
+      // The served PATH is content-addressed (entry-<contenthash>), never
+      // Metro's filename: Metro's name is not reliably content-derived, and a
+      // retained update whose on-disk file a newer export overwrote would fail
+      // its SHA-256 check on rollback.
       expect(ios.launchAsset.url).toBe(
-        `${PLACEHOLDER}/api/v2/updates/static/${BUNDLE_PATH}?h=${BUNDLE_BUSTER}`,
+        `${PLACEHOLDER}/api/v2/updates/static/_expo/static/js/ios/entry-${BUNDLE_BUSTER}.hbc?h=${BUNDLE_BUSTER}`,
       );
-      // The launch asset key is CONTENT-derived, never Metro's filename: the
-      // on-device store dedupes by key without re-hashing, so a filename key
-      // let a device silently reuse a previous deploy's stale bundle bytes.
+      // The launch asset key is CONTENT-derived too: the on-device store
+      // dedupes by key without re-hashing, so a filename key let a device
+      // silently reuse a previous deploy's stale bundle bytes.
       expect(ios.launchAsset.key).toBe(`entry-${BUNDLE_BUSTER}`);
       expect(ios.assets).toEqual([
         expect.objectContaining({
@@ -141,9 +158,10 @@ describe('generate-update-manifest.mjs', () => {
       expect(ios.extra.expoClient.extra.gatewayUrl).toBe(PLACEHOLDER);
       expect(ios.extra.otaAppVersion).toBe('1.1.162-ac83861');
       expect(stored.android.extra.otaAppVersion).toBe('1.1.162-ac83861');
-      // The shared version is also surfaced at the top level for the healthcheck
-      // API route, which has no platform to key on.
+      // The shared version doubles as the entry's store key (channel pointers
+      // and OTA_UPDATE_PIN select by it).
       expect(stored.otaAppVersion).toBe('1.1.162-ac83861');
+      expect(stored.key).toBe('1.1.162-ac83861');
       // The placeholder token and the env->host map are baked in so the manifest
       // API route can resolve the running environment's gateway per request.
       expect(stored.gatewayPlaceholder).toBe(PLACEHOLDER);
@@ -165,7 +183,7 @@ describe('generate-update-manifest.mjs', () => {
       runScript(dir, { ...BUILD_ENV, OTA_ENVIRONMENT: 'production' });
       const ios = readStoredManifest(dir).ios;
       expect(ios.launchAsset.url).toBe(
-        `${PLACEHOLDER}/api/v2/updates/static/${BUNDLE_PATH}?h=${BUNDLE_BUSTER}`,
+        `${PLACEHOLDER}/api/v2/updates/static/_expo/static/js/ios/entry-${BUNDLE_BUSTER}.hbc?h=${BUNDLE_BUSTER}`,
       );
       expect(ios.extra.expoClient.updates.url).toBe(`${PLACEHOLDER}/api/v2/updates/manifest`);
       expect(ios.extra.expoClient.extra.gatewayUrl).toBe(PLACEHOLDER);
@@ -184,7 +202,7 @@ describe('generate-update-manifest.mjs', () => {
       const stored = readStoredManifest(dir);
       const ios = stored.ios;
       expect(ios.launchAsset.url).toBe(
-        `https://override.test.example/api/v2/updates/static/${BUNDLE_PATH}?h=${BUNDLE_BUSTER}`,
+        `https://override.test.example/api/v2/updates/static/_expo/static/js/ios/entry-${BUNDLE_BUSTER}.hbc?h=${BUNDLE_BUSTER}`,
       );
       expect(ios.extra.expoClient.extra.gatewayUrl).toBe('https://override.test.example');
       // No placeholder was stamped, so the route has nothing to swap and must
@@ -285,6 +303,154 @@ describe('generate-update-manifest.mjs', () => {
       // A single image serves both environments, so a placeholder that resolves
       // in only one (or neither) is a dead manifest -- the export must fail.
       expect(String((thrown as { stderr?: Buffer }).stderr)).toContain('gateway hosts');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a storeVersion-2 store whose channels point at the new export', () => {
+    const dir = makeWorkspace(true);
+    try {
+      runScript(dir, BUILD_ENV);
+      const store = readStore(dir);
+      expect(store.storeVersion).toBe(2);
+      expect(store.updates).toHaveLength(1);
+      expect(store.channels).toEqual({
+        development: '1.1.162-ac83861',
+        production: '1.1.162-ac83861',
+      });
+      // Every static file the update references is recorded for retention GC
+      // (the bundle under its content-addressed name).
+      expect(store.updates[0].files).toEqual(
+        expect.arrayContaining([
+          `_expo/static/js/ios/entry-${BUNDLE_BUSTER}.hbc`,
+          ASSET_PATH,
+        ]),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** Re-seed dist/native-export (the script deletes it) for a follow-up export. */
+  function seedExport(dir: string, bundleContent: string): void {
+    const bundleAbs = path.join(dir, 'dist', 'native-export', BUNDLE_PATH);
+    mkdirSync(path.dirname(bundleAbs), { recursive: true });
+    writeFileSync(bundleAbs, bundleContent);
+    const assetAbs = path.join(dir, 'dist', 'native-export', ASSET_PATH);
+    mkdirSync(path.dirname(assetAbs), { recursive: true });
+    writeFileSync(assetAbs, 'png-bytes');
+    writeFileSync(
+      path.join(dir, 'dist', 'native-export', 'metadata.json'),
+      JSON.stringify({
+        fileMetadata: {
+          ios: { bundle: BUNDLE_PATH, assets: [{ path: ASSET_PATH, ext: 'png' }] },
+          android: { bundle: BUNDLE_PATH, assets: [{ path: ASSET_PATH, ext: 'png' }] },
+        },
+      }),
+    );
+  }
+
+  it('retains previous updates across exports and re-materializes their files', () => {
+    const dir = makeWorkspace(true);
+    try {
+      runScript(dir, BUILD_ENV);
+
+      // Second export: expo export wipes dist/ in real life -- simulate the
+      // wipe so retention genuinely comes from the archive, not leftovers.
+      rmSync(path.join(dir, 'dist'), { recursive: true, force: true });
+      seedExport(dir, 'console.log("y")');
+      runScript(dir, {
+        BUILD_NUMBER: '1.1.163',
+        BUILD_VCS_NUMBER: 'bc83861aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      });
+
+      const store = readStore(dir);
+      expect(store.updates.map((u) => u.key)).toEqual([
+        '1.1.163-bc83861',
+        '1.1.162-ac83861',
+      ]);
+      // Channels advance to the newest export.
+      expect(store.channels.production).toBe('1.1.163-bc83861');
+      // Content-addressed bundle paths mean BOTH versions' bytes coexist in
+      // dist/client -- the retained update's file was re-materialized from the
+      // archive after the wipe, so a rollback can still serve it verbatim.
+      const oldBuster = createHash('sha256')
+        .update('console.log("x")')
+        .digest('base64url')
+        .slice(0, 16);
+      const newBuster = createHash('sha256')
+        .update('console.log("y")')
+        .digest('base64url')
+        .slice(0, 16);
+      expect(
+        readFileSync(
+          path.join(dir, 'dist', 'client', '_expo/static/js/ios', `entry-${newBuster}.hbc`),
+          'utf-8',
+        ),
+      ).toBe('console.log("y")');
+      expect(
+        readFileSync(
+          path.join(dir, 'dist', 'client', '_expo/static/js/ios', `entry-${oldBuster}.hbc`),
+          'utf-8',
+        ),
+      ).toBe('console.log("x")');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prunes beyond the retention window and GCs unreferenced archived files', () => {
+    const dir = makeWorkspace(true);
+    try {
+      const shas = ['ac83861', 'bc83861', 'cc83861'];
+      for (const [i, sha] of shas.entries()) {
+        if (i > 0) {
+          rmSync(path.join(dir, 'dist'), { recursive: true, force: true });
+          seedExport(dir, `console.log(${i})`);
+        }
+        runScript(dir, {
+          BUILD_NUMBER: `1.1.${162 + i}`,
+          BUILD_VCS_NUMBER: `${sha}${'a'.repeat(33)}`,
+          OTA_RETAIN_UPDATES: '2',
+        });
+      }
+
+      const store = readStore(dir);
+      expect(store.updates.map((u) => u.key)).toEqual([
+        '1.1.164-cc83861',
+        '1.1.163-bc83861',
+      ]);
+      // Shared, still-referenced files survive the GC ...
+      expect(
+        readFileSync(path.join(dir, '.ota-archive', 'static', ASSET_PATH), 'utf-8'),
+      ).toBe('png-bytes');
+      // ... and the PRUNED first export's now-unreferenced bundle is DELETED
+      // (content-addressed names make each export's bundle a distinct file, so
+      // an unbounded no-op GC would be visible here as a surviving file).
+      const prunedBuster = createHash('sha256')
+        .update('console.log("x")')
+        .digest('base64url')
+        .slice(0, 16);
+      expect(
+        existsSync(
+          path.join(dir, '.ota-archive', 'static', '_expo/static/js/ios', `entry-${prunedBuster}.hbc`),
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('re-exporting the same build replaces its entry instead of duplicating it', () => {
+    const dir = makeWorkspace(true);
+    try {
+      runScript(dir, BUILD_ENV);
+      rmSync(path.join(dir, 'dist'), { recursive: true, force: true });
+      seedExport(dir, 'console.log("x")');
+      runScript(dir, BUILD_ENV);
+
+      expect(readStore(dir).updates).toHaveLength(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

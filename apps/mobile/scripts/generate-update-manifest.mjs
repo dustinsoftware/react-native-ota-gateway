@@ -2,8 +2,15 @@
  * Generates an Expo Updates Protocol v1 manifest from a native expo export.
  *
  * Reads: dist/native-export/metadata.json (written by expo export)
- * Writes: dist/server/update-manifest.json (read at runtime by the manifest API route)
- * Copies: native bundles and assets into dist/client/ so the server serves them statically
+ * Writes: dist/server/update-manifest.json -- a storeVersion-2 UPDATE STORE:
+ *         the newest export plus up to OTA_RETAIN_UPDATES-1 retained previous
+ *         updates, and per-environment channel pointers (repointed at the
+ *         newest export). The manifest API route serves the pointed-at update;
+ *         repointing (or OTA_UPDATE_PIN on a container) is rollback.
+ * Archives: retained updates + their static files under .ota-archive/ so they
+ *         survive expo export wiping dist/ between deploys.
+ * Copies: every RETAINED update's bundles/assets into dist/client/ so the
+ *         server can still serve a rolled-back update's files.
  * Cleans: dist/native-export/ (temp dir)
  *
  * Usage:
@@ -21,21 +28,31 @@
  *                         base. Falls back to expo.version for local exports.
  *   BUILD_VCS_NUMBER      Git commit SHA used to identify the source revision.
  *                         Falls back to the local repository HEAD.
+ *   OTA_RETAIN_UPDATES    How many updates the store retains (default 3).
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 
 const NATIVE_EXPORT_DIR = "dist/native-export";
 const CLIENT_DIR = join("dist", "client");
 const SERVER_DIR = join("dist", "server");
+// Retained updates survive `expo export` wiping dist/: their manifests live in
+// ARCHIVE_DIR/store.json and their static files under ARCHIVE_DIR/static/,
+// re-materialized into dist/client on every export.
+const ARCHIVE_DIR = ".ota-archive";
+const ARCHIVE_STATIC_DIR = join(ARCHIVE_DIR, "static");
+const RETAIN_UPDATES = Math.max(1, Number(process.env.OTA_RETAIN_UPDATES ?? 3));
 const appJson = JSON.parse(readFileSync("app.json", "utf-8"));
 const expoConfig = appJson.expo;
 const runtimeVersion = String(expoConfig.runtimeVersion ?? "1");
@@ -203,11 +220,21 @@ function toContentType(ext) {
   return EXT_TO_CONTENT_TYPE[ext.toLowerCase()] ?? "application/octet-stream";
 }
 
-/** Copy a file from the native export dir to dist/client/, creating dirs as needed. */
+/**
+ * Copy a file from the native export dir to dist/client/ AND into the archive
+ * (so it survives the next export wiping dist/), recording the relative path
+ * on the update entry for retention GC.
+ */
+const newUpdateFiles = new Set();
 function copyToClient(srcPath, destRelative) {
   const dest = join(CLIENT_DIR, destRelative);
   mkdirSync(dirname(dest), { recursive: true });
   copyFileSync(srcPath, dest);
+
+  const archived = join(ARCHIVE_STATIC_DIR, destRelative);
+  mkdirSync(dirname(archived), { recursive: true });
+  copyFileSync(srcPath, archived);
+  newUpdateFiles.add(destRelative);
 }
 
 // 16 base64url chars = 96 bits of the content hash: far more than enough for
@@ -241,7 +268,18 @@ function buildPlatformManifest(platform) {
   const bundleSrcPath = join(NATIVE_EXPORT_DIR, platMeta.bundle);
   const bundleHash = sha256Base64Url(bundleSrcPath);
 
-  copyToClient(bundleSrcPath, platMeta.bundle);
+  // Serve/archive the bundle under a CONTENT-ADDRESSED path, not Metro's
+  // entry-<hash> filename: Metro's name is not reliably content-derived (see
+  // withCacheBuster), so two retained updates could collide on the same
+  // on-disk filename with different bytes -- the newer export would silently
+  // overwrite the older RETAINED update's bundle and a rollback to it would
+  // fail expo-updates' SHA-256 check. A content-derived filename makes every
+  // byte-version its own immutable file, which is what retention requires.
+  const bundleDest = join(
+    dirname(platMeta.bundle),
+    `entry-${bundleHash.slice(0, CACHE_BUSTER_HASH_CHARS)}${extname(platMeta.bundle)}`,
+  );
+  copyToClient(bundleSrcPath, bundleDest);
 
   // The launch asset's key is derived from the CONTENT hash, not Metro's
   // entry-<hash> filename. expo-updates' on-device store dedupes and names
@@ -253,7 +291,7 @@ function buildPlatformManifest(platform) {
   // Metro's key: those filenames ARE content hashes, and the bundle resolves
   // embedded assets by that exact key at runtime.
   const launchAsset = {
-    url: withCacheBuster(`${BASE_URL}${STATIC_URL_PREFIX}/${platMeta.bundle}`, bundleHash),
+    url: withCacheBuster(`${BASE_URL}${STATIC_URL_PREFIX}/${bundleDest}`, bundleHash),
     contentType: "application/javascript",
     key: `entry-${bundleHash.slice(0, CACHE_BUSTER_HASH_CHARS)}`,
     hash: bundleHash,
@@ -293,14 +331,18 @@ function buildPlatformManifest(platform) {
 
 const platforms = Object.keys(metadata.fileMetadata);
 // otaAppVersion is identical across platforms (it identifies the build, not the
-// bundle), so surface it once at the top level too.
+// bundle), so it doubles as the update's stable store key: channel pointers
+// and the serve-time OTA_UPDATE_PIN override select by it, and re-exporting
+// the same build replaces its entry instead of duplicating it.
 //
 // When the base URL is the runtime placeholder, also bake the placeholder token
 // and the full environment->gateway map so the manifest API route can resolve
 // the running environment's host on each request. Omitted when a concrete
 // OTA_GATEWAY_URL was stamped -- there is then no placeholder to swap.
 const usedPlaceholder = BASE_URL === GATEWAY_PLACEHOLDER;
-const stored = {
+const entry = {
+  key: otaAppVersion,
+  createdAt: new Date().toISOString(),
   runtimeVersion,
   otaAppVersion,
   ...(usedPlaceholder
@@ -308,20 +350,104 @@ const stored = {
     : {}),
 };
 for (const platform of platforms) {
-  stored[platform] = buildPlatformManifest(platform);
+  entry[platform] = buildPlatformManifest(platform);
+}
+entry.files = [...newUpdateFiles].sort();
+
+// -- Retention: fold the new entry into the archived store --
+// Same-key re-exports replace their entry (newest first); the store keeps at
+// most RETAIN_UPDATES entries. Rollback stays possible exactly as far back as
+// retention reaches.
+const archiveStorePath = join(ARCHIVE_DIR, "store.json");
+let retained = [];
+if (existsSync(archiveStorePath)) {
+  try {
+    const parsed = JSON.parse(readFileSync(archiveStorePath, "utf-8"));
+    if (Array.isArray(parsed.updates)) {
+      retained = parsed.updates;
+    }
+  } catch (err) {
+    console.warn(
+      "[generate-update-manifest] Ignoring unreadable archive store:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+const updates = [entry, ...retained.filter((u) => u.key !== entry.key)].slice(
+  0,
+  RETAIN_UPDATES,
+);
+
+// -- Retention GC: drop archived files no retained update references --
+// Files are content-addressed and SHARED between updates (an unchanged image
+// keeps its filename across exports), so deletion must be reference-counted
+// against the union of every retained entry's file list, never per-entry.
+const referenced = new Set(updates.flatMap((u) => u.files ?? []));
+function walkFiles(dir, base = "") {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+    d.isDirectory()
+      ? walkFiles(join(dir, d.name), join(base, d.name))
+      : [join(base, d.name)],
+  );
+}
+let pruned = 0;
+for (const relative of walkFiles(ARCHIVE_STATIC_DIR)) {
+  if (!referenced.has(relative)) {
+    rmSync(join(ARCHIVE_STATIC_DIR, relative), { force: true });
+    pruned += 1;
+  }
 }
 
+// -- Materialize retained updates' files into dist/client --
+// expo export wiped dist/, so every RETAINED (non-new) update's files must be
+// copied back from the archive or a rollback would 404 its assets.
+let materialized = 0;
+for (const update of updates) {
+  for (const relative of update.files ?? []) {
+    const dest = join(CLIENT_DIR, relative);
+    if (existsSync(dest)) continue;
+    const src = join(ARCHIVE_STATIC_DIR, relative);
+    if (!existsSync(src)) {
+      throw new Error(
+        `[generate-update-manifest] Retained update ${update.key} references `
+          + `missing archived file ${relative}; delete ${ARCHIVE_DIR}/ to reset retention`,
+      );
+    }
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+    materialized += 1;
+  }
+}
+
+// Channel pointers both advance to the new export by default. Serving-time
+// divergence (canary/rollback) is per-instance: set OTA_UPDATE_PIN on a
+// container to a retained key, or hand-edit the pointers before deploy.
+const store = {
+  storeVersion: 2,
+  channels: { development: entry.key, production: entry.key },
+  updates,
+};
+
 mkdirSync(SERVER_DIR, { recursive: true });
-writeFileSync(
-  join(SERVER_DIR, "update-manifest.json"),
-  JSON.stringify(stored, null, 2),
-);
+writeFileSync(join(SERVER_DIR, "update-manifest.json"), JSON.stringify(store, null, 2));
+mkdirSync(ARCHIVE_DIR, { recursive: true });
+// Atomic write: a crash mid-write would leave a truncated store.json, the
+// next export would reset retention to empty, and the GC would then delete
+// every archived file -- destroying rollback history. tmp+rename keeps the
+// previous store intact until the new one is fully on disk.
+writeFileSync(`${archiveStorePath}.tmp`, JSON.stringify({ updates }, null, 2));
+renameSync(`${archiveStorePath}.tmp`, archiveStorePath);
 
 console.log("[generate-update-manifest] Written dist/server/update-manifest.json");
 console.log(`  runtimeVersion: ${runtimeVersion}`);
 console.log(`  otaAppVersion: ${otaAppVersion}`);
+console.log(
+  `  retained updates: ${updates.map((u) => u.key).join(", ")} `
+    + `(retain ${RETAIN_UPDATES}; ${materialized} archived file(s) re-materialized, ${pruned} pruned)`,
+);
 for (const platform of platforms) {
-  console.log(`  ${platform} bundle: ${stored[platform].launchAsset.url}`);
+  console.log(`  ${platform} bundle: ${entry[platform].launchAsset.url}`);
 }
 
 rmSync(NATIVE_EXPORT_DIR, { recursive: true, force: true });

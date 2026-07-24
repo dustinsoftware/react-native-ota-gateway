@@ -7,6 +7,8 @@ expo-env.d.ts
 
 # build output
 dist/
+# Retained OTA updates + their static files (generate-update-manifest.mjs)
+apps/mobile/.ota-archive/
 
 # generated native folders
 # apps/mobile/ios and apps/mobile/android are regenerated from Expo config

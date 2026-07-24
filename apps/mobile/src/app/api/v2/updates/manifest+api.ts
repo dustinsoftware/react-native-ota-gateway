@@ -20,12 +20,16 @@ interface UpdateManifest {
   extra: Record<string, unknown>;
 }
 
-interface StoredManifest {
+interface StoredUpdate {
+  // Stable identity of this update in the store (the export's otaAppVersion);
+  // channel pointers and the OTA_UPDATE_PIN override select by this key.
+  key: string;
+  createdAt: string;
   runtimeVersion: string;
   // Platform-independent build identifier. This route ignores it and serves
   // the per-platform manifests below.
   otaAppVersion?: string;
-  // Present when the manifest was built for the single-export / runtime-gateway
+  // Present when the update was built for the placeholder / runtime-gateway
   // scheme (scripts/generate-update-manifest.mjs): every environment-specific
   // URL in the platform manifests is stamped with `gatewayPlaceholder`, and
   // `gatewayUrls` maps the deploy environment to its real gateway host. This
@@ -35,8 +39,25 @@ interface StoredManifest {
   // already environment-specific and served verbatim.
   gatewayPlaceholder?: string;
   gatewayUrls?: { development?: string; production?: string };
+  // Relative static paths this update's launch asset + assets occupy; used by
+  // the export script's retention GC, ignored here.
+  files?: string[];
   ios?: UpdateManifest;
   android?: UpdateManifest;
+}
+
+/**
+ * The versioned update store (dist/server/update-manifest.json, storeVersion
+ * 2). The export script RETAINS recent updates and repoints the per-environment
+ * channel pointers at the newest one; this route resolves the pointer for its
+ * OTA_ENVIRONMENT (or the OTA_UPDATE_PIN override) and serves that update.
+ * Retention + pointers are what make rollback an ops action: repoint (or pin a
+ * container) to a retained key -- no rebuild, no redeploy of the JS.
+ */
+interface UpdateStore {
+  storeVersion: number;
+  channels: { development?: string; production?: string };
+  updates: StoredUpdate[];
 }
 
 function isEnoent(err: unknown): boolean {
@@ -61,7 +82,7 @@ function noUpdate(): Response {
  * the resolved environment.
  */
 function resolveGatewayBase(
-  gatewayUrls: NonNullable<StoredManifest['gatewayUrls']>,
+  gatewayUrls: NonNullable<StoredUpdate['gatewayUrls']>,
 ): string | undefined {
   const key = process.env.OTA_ENVIRONMENT === 'production' ? 'production' : 'development';
   // No cross-environment fallback: a production instance missing its production
@@ -149,21 +170,50 @@ export async function GET(request: Request): Promise<Response> {
     return new Response('Unsupported protocol version', { status: 406 });
   }
 
-  let stored: StoredManifest;
+  let store: UpdateStore;
   try {
     const raw = readFileSync(
       join(process.cwd(), 'dist', 'server', 'update-manifest.json'),
       'utf-8',
     );
-    stored = JSON.parse(raw) as StoredManifest;
+    store = JSON.parse(raw) as UpdateStore;
   } catch (err) {
     if (isEnoent(err)) {
-      // No manifest on disk -- no update available (normal on first deploy)
+      // No store on disk -- no update available (normal on first deploy)
       return noUpdate();
     }
     // Real failure: log so it surfaces in the server logs and return 500
     console.error('[updates/manifest] Failed to read update manifest:', err);
     return new Response('Internal Server Error', { status: 500 });
+  }
+
+  // The store format is versioned and the serving image is rebuilt with every
+  // export, so an unknown version is a deploy bug, not a migration case.
+  if (store.storeVersion !== 2) {
+    console.error(
+      `[updates/manifest] Unsupported store version ${JSON.stringify(store.storeVersion)}; expected 2.`,
+    );
+    return new Response('Internal Server Error', { status: 500 });
+  }
+  if (!Array.isArray(store.updates) || store.updates.length === 0) {
+    return noUpdate();
+  }
+
+  // Select the update: an explicit per-instance pin wins (the blue/green /
+  // rollback lever -- point one container at a retained key), then this
+  // environment's channel pointer. Same strict-'production' polarity as the
+  // gateway resolution below. Unknown keys fall back to the newest retained
+  // update, loudly: serving SOMETHING compatible beats a silent outage, but
+  // a dangling pointer is an ops mistake worth surfacing.
+  const channel = process.env.OTA_ENVIRONMENT === 'production' ? 'production' : 'development';
+  const requestedKey = process.env.OTA_UPDATE_PIN ?? store.channels?.[channel];
+  let stored = store.updates.find((update) => update.key === requestedKey);
+  if (!stored) {
+    console.error(
+      `[updates/manifest] No retained update matches key ${JSON.stringify(requestedKey)} `
+        + `for channel "${channel}"; falling back to the newest retained update.`,
+    );
+    stored = store.updates[0];
   }
 
   if (stored.runtimeVersion !== runtimeVersion) {

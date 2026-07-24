@@ -48,15 +48,18 @@ function platformManifest(bundle: string): Record<string, unknown> {
 }
 
 /**
- * A stored manifest whose environment-specific URLs are stamped with the runtime
- * gateway placeholder (as scripts/generate-update-manifest.mjs bakes it), plus
- * the env->host map the route resolves against. The ios/android platform
- * manifests carry distinct bundle URLs so a platform-selection regression is
- * observable. `overrides` lets a test drop the placeholder / map or change the
- * runtimeVersion to exercise the verbatim, unresolvable, and no-update paths.
+ * One stored update entry whose environment-specific URLs are stamped with the
+ * runtime gateway placeholder (as scripts/generate-update-manifest.mjs bakes
+ * it), plus the env->host map the route resolves against. The ios/android
+ * platform manifests carry distinct bundle URLs so a platform-selection
+ * regression is observable. `overrides` lets a test drop the placeholder / map
+ * or change the runtimeVersion to exercise the verbatim, unresolvable, and
+ * no-update paths.
  */
-function storedManifest(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
+function updateEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key: '1.1.162-ac83861',
+    createdAt: '2026-07-14T00:00:00.000Z',
     runtimeVersion: '1',
     otaAppVersion: '1.1.162-ac83861',
     gatewayPlaceholder: PLACEHOLDER,
@@ -64,6 +67,24 @@ function storedManifest(overrides: Record<string, unknown> = {}): string {
     ios: platformManifest(IOS_BUNDLE),
     android: platformManifest(ANDROID_BUNDLE),
     ...overrides,
+  };
+}
+
+/**
+ * A storeVersion-2 update store: newest-first retained updates plus the
+ * per-environment channel pointers, defaulting to a single update both
+ * channels point at (the shape every fresh export writes).
+ */
+function storedManifest(
+  entryOverrides: Record<string, unknown> = {},
+  storeOverrides: Record<string, unknown> = {},
+): string {
+  const entry = updateEntry(entryOverrides);
+  return JSON.stringify({
+    storeVersion: 2,
+    channels: { development: entry.key, production: entry.key },
+    updates: [entry],
+    ...storeOverrides,
   });
 }
 
@@ -317,6 +338,115 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
 
     it('returns 204 when the manifest has no entry for the platform', async () => {
       mockReadFileSync.mockReturnValueOnce(storedManifest({ ios: undefined }));
+      const res = await GET(manifestRequest());
+      expect(res.status).toBe(204);
+    });
+  });
+
+  describe('store v2 selection (channels, pin, retention)', () => {
+    const savedPin = process.env.OTA_UPDATE_PIN;
+
+    afterEach(() => {
+      if (savedPin === undefined) delete process.env.OTA_UPDATE_PIN;
+      else process.env.OTA_UPDATE_PIN = savedPin;
+    });
+
+    function twoUpdateStore(channels: Record<string, string>): string {
+      // Newest first, distinct bundles so the served entry is observable.
+      const newer = updateEntry({ key: 'v2-key' });
+      const older = updateEntry({
+        key: 'v1-key',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        ios: platformManifest('_expo/static/js/ios/entry-old.hbc'),
+      });
+      return JSON.stringify({ storeVersion: 2, channels, updates: [newer, older] });
+    }
+
+    it("serves the environment's channel pointer, not just the newest update", async () => {
+      // Production repointed at the RETAINED older update (a rollback) while
+      // development stays on the newest -- the core blue/green lever.
+      process.env.OTA_ENVIRONMENT = 'production';
+      delete process.env.OTA_UPDATE_PIN;
+      mockReadFileSync.mockReturnValueOnce(
+        twoUpdateStore({ development: 'v2-key', production: 'v1-key' }),
+      );
+
+      const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
+        launchAsset: { url: string };
+      };
+      expect(manifest.launchAsset.url).toBe(
+        `${PROD_GATEWAY}/api/v2/updates/static/_expo/static/js/ios/entry-old.hbc`,
+      );
+    });
+
+    it('OTA_UPDATE_PIN overrides the channel pointer (per-instance rollback)', async () => {
+      delete process.env.OTA_ENVIRONMENT;
+      process.env.OTA_UPDATE_PIN = 'v1-key';
+      mockReadFileSync.mockReturnValueOnce(
+        twoUpdateStore({ development: 'v2-key', production: 'v2-key' }),
+      );
+
+      const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
+        launchAsset: { url: string };
+      };
+      expect(manifest.launchAsset.url).toBe(
+        `${DEV_GATEWAY}/api/v2/updates/static/_expo/static/js/ios/entry-old.hbc`,
+      );
+    });
+
+    it('falls back to the newest retained update, loudly, on a dangling pointer', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      delete process.env.OTA_ENVIRONMENT;
+      delete process.env.OTA_UPDATE_PIN;
+      mockReadFileSync.mockReturnValueOnce(
+        twoUpdateStore({ development: 'pruned-key', production: 'v2-key' }),
+      );
+
+      const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
+        launchAsset: { url: string };
+      };
+      // Newest-first entry served, and the dangling pointer surfaced in logs.
+      expect(manifest.launchAsset.url).toBe(`${DEV_GATEWAY}/api/v2/updates/static/${IOS_BUNDLE}`);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('No retained update matches'));
+      errorSpy.mockRestore();
+    });
+
+    it('freezes (204) on a pinned update with an incompatible runtimeVersion -- never falls forward', async () => {
+      // The pin exists for rollback/canary: a container pinned to a retained
+      // key whose runtime no longer matches the client must WITHHOLD, not
+      // silently serve the newest compatible update instead.
+      delete process.env.OTA_ENVIRONMENT;
+      process.env.OTA_UPDATE_PIN = 'v1-key';
+      const newer = updateEntry({ key: 'v2-key' });
+      const older = updateEntry({ key: 'v1-key', runtimeVersion: '2' });
+      mockReadFileSync.mockReturnValueOnce(
+        JSON.stringify({
+          storeVersion: 2,
+          channels: { development: 'v2-key', production: 'v2-key' },
+          updates: [newer, older],
+        }),
+      );
+
+      const res = await GET(manifestRequest());
+      expect(res.status).toBe(204);
+    });
+
+    it('returns 500 and logs on an unsupported store version', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockReadFileSync.mockReturnValueOnce(
+        JSON.stringify({ runtimeVersion: '1', ios: platformManifest(IOS_BUNDLE) }),
+      );
+
+      const res = await GET(manifestRequest());
+      expect(res.status).toBe(500);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Unsupported store version'));
+      errorSpy.mockRestore();
+    });
+
+    it('returns 204 when the store retains no updates', async () => {
+      mockReadFileSync.mockReturnValueOnce(
+        JSON.stringify({ storeVersion: 2, channels: {}, updates: [] }),
+      );
       const res = await GET(manifestRequest());
       expect(res.status).toBe(204);
     });

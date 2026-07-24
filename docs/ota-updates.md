@@ -18,7 +18,7 @@ static prefix `/api/v2/updates/static`, base-URL placeholder
 | Piece | Location | Role |
 | --- | --- | --- |
 | Export | `scripts/export-web.mjs` | Runs `expo export` for all platforms (web server output + native), then kills the process (Metro never exits on its own). |
-| Manifest generator | `scripts/generate-update-manifest.mjs` | Turns the native export's `metadata.json` into `dist/server/update-manifest.json`; copies bundle + assets into `dist/client/`. |
+| Manifest generator | `scripts/generate-update-manifest.mjs` | Turns the native export's `metadata.json` into the storeVersion-2 update store (`dist/server/update-manifest.json`): the new update plus retained previous updates (`.ota-archive/`, default 3, `OTA_RETAIN_UPDATES`) and per-environment channel pointers repointed at the new export; copies every retained update's bundle + assets into `dist/client/`. |
 | Manifest route | `src/app/api/v2/updates/manifest+api.ts` | `expo-router` `+api.ts` route that serves the Protocol v1 manifest per request. |
 | Static mount | `server/index.ts` | `express.static` on `/api/v2/updates/static` (1-year `immutable`; safe via `?h=` busters). |
 | Launch gate | `src/components/ota-gate.tsx` + `src/utils/attempt-ota-update.ts` | Blocks first render while an update is fetched, per the embedded/stale/fresh policy. |
@@ -34,8 +34,15 @@ On `GET` it reads the request headers `expo-platform`, `expo-runtime-version`,
 - `expo-protocol-version` not `1` -> **406** (`Unsupported protocol version`).
 - No `dist/server/update-manifest.json` on disk -> **204** (no update; normal on
   first deploy).
-- Stored `runtimeVersion` != the client's `expo-runtime-version` -> **204** (the
-  client's native runtime is incompatible with this bundle).
+- Store `storeVersion` != 2 -> **500** (a deploy bug: the image is rebuilt with
+  every export, so there is no migration case). Empty `updates` -> **204**.
+- **Update selection**: `OTA_UPDATE_PIN` (a per-instance override naming a
+  retained update key -- the rollback/canary lever) wins; otherwise this
+  environment's channel pointer (`channels.development` / `.production`, same
+  strict-`production` polarity as gateway resolution). A dangling key falls
+  back to the newest retained update, loudly logged.
+- Selected update's `runtimeVersion` != the client's `expo-runtime-version` ->
+  **204** (the client's native runtime is incompatible with this bundle).
 - No manifest for the requested platform -> **204**.
 - Otherwise -> **200** `multipart/mixed` with the manifest part
   (`Content-Disposition: form-data; name="manifest"`), boundary
@@ -56,7 +63,7 @@ environment. Two mechanisms keep one build correct for both.
 URL appears -- launch-asset URL, every asset URL, `updates.url`, and
 `extra.gatewayUrl` in the embedded expo config -- it stamps the placeholder
 token `__OTA_GATEWAY_BASE_URL__`. It also bakes, into
-`dist/server/update-manifest.json`, the placeholder plus the full
+each stored update entry, the placeholder plus the full
 `gatewayUrls` map (`{ development: http://localhost:3000, production:
 http://localhost:3001 }`, from `app.json`).
 
