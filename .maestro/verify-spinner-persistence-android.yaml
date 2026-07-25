@@ -48,9 +48,17 @@ appId: dev.otagateway.host
     start: "40%, 38%"
     end: "40%, 54%"
     duration: 200
-- extendedWaitUntil:
-    visible: "spinning"
-    timeout: 5000
+# Wrapped in retry for the same reason as the roundtrip/relaunch asserts below:
+# on this Maestro version a text-based extendedWaitUntil can abort after a
+# single hierarchy poll (~1s) instead of honoring its timeout, so a bare assert
+# here flakes when the read-out flips "idle"->"spinning" a beat after the swipe.
+# The retry re-arms the wait; id-based waits poll correctly and stay bare.
+- retry:
+    maxRetries: 3
+    commands:
+      - extendedWaitUntil:
+          visible: "spinning"
+          timeout: 15000
 
 # Tab roundtrip: Sky tears the spinner surface down (activity recreate);
 # returning must resume the coast from the native store.
