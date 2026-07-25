@@ -5,6 +5,29 @@ update** stack (no EAS) plus a **Callstack brownfield** integration, with **zero
 proprietary dependencies**. It is fully self-contained and generic, so it can be
 read, run, and copied freely.
 
+## Why this exists
+
+Two problems most React Native teams eventually hit, solved in one small,
+copyable tree:
+
+- **OTA updates without a hosted service.** Expo's over-the-air updates are
+  normally delivered by EAS Update (a paid, hosted service). But the Expo
+  Updates protocol is *just HTTP* — a manifest plus content-addressed assets.
+  Teams that need updates on their own infrastructure (compliance, air-gapped
+  networks, an existing CDN, or simply no vendor lock-in) can serve it
+  themselves. This repo does exactly that, with **no EAS and zero proprietary
+  dependencies**.
+- **Adopting RN in an app that already exists (brownfield).** Most real apps
+  aren't greenfield — they're established native apps that want React Native
+  *screen by screen*, with the native side still owning navigation. This repo
+  ships the same JS as an iOS **XCFramework** and an Android **AAR** that a
+  minimal native host embeds, while the *same* source tree also runs as
+  standalone web and standalone native.
+
+The interesting part is the seam where these meet: a self-hosted OTA bundle
+delivered into a brownfield host, in both a hot-reload dev mode and a
+release/OTA mode, on both platforms.
+
 ## What this is
 
 One Expo SDK 55 / React Native 0.83 code tree (`apps/mobile`) that serves three
@@ -40,6 +63,19 @@ export -- never as host-run dev servers; the host-run `pnpm server:*` scripts
 exist only for standalone-web iteration. See
 [docs/development-workflow.md](./docs/development-workflow.md).
 
+## Screenshots
+
+The brownfield host's Developer tab, running the self-hosted OTA bundle (Mode B)
+on the iOS simulator and the Android emulator. Note the OTA marker, the
+per-environment update id, `Embedded launch: false` (served from the gateway,
+not the embedded fallback), and the native tab bar the host owns.
+
+<p>
+  <img src="docs/images/developer-ota-ios.png" alt="iOS Developer / OTA screen served from the gateway" width="260">
+  &nbsp;&nbsp;
+  <img src="docs/images/developer-ota-android.png" alt="Android Developer / OTA screen served from the gateway" width="260">
+</p>
+
 ## Orientation
 
 Everything canonical lives in [`docs/`](./docs). Read the relevant document
@@ -66,6 +102,51 @@ before working on a subsystem, and keep it current with any change (see
 | Manifest base-URL placeholder | `__OTA_GATEWAY_BASE_URL__` |
 | Build-time env selector | `OTA_ENVIRONMENT` |
 | Dev gateway / prod gateway | `http://localhost:3000` / `http://localhost:3001` |
+
+## Glossary
+
+Terms used throughout this repo and its docs:
+
+| Term | Meaning |
+| --- | --- |
+| **Brownfield** | Embedding React Native into an *existing* native app (vs. a greenfield RN app). Here: an iOS XCFramework / Android AAR that `hosts/*` embed. |
+| **Gateway** | The self-hosted OTA backend — the app's own Express server, run as a dev instance (`:3000`) and a prod instance (`:3001`). It serves the Expo Updates manifest and assets (and, in a browser, the standalone web build). |
+| **Mode A** | Local hot-reload: the host loads JS from Metro (`:8081`) with Fast Refresh. For iterating on RN/JS. |
+| **Mode B** | Release artifact: the host loads JS from the OTA manifest / embedded bundle (no Metro). The shippable path. |
+| **OTA marker** | A version string baked into the JS bundle (`apps/mobile/src/constants/marker.ts`), shown on the Developer screen. Bumping it and re-exporting is how the OTA demo proves a new bundle was delivered (v1 → v2). |
+| **Update id** | The per-environment id in the served manifest. Dev and prod derive *different* ids for the *same* bytes, demonstrating the environment seam. |
+| **Host-state seam** | The bridge by which a component opts into HOST-side state persistence (e.g. the fidget spinner keeps coasting across tab switches and process death). |
+| **Message bridge** | The native ⇄ RN channel; lets RN screens navigate into native screens, and carries host-state checkpoints. |
+| **Self-warming flow** | A Maestro test that launches, waits for the freshly-exported bundle to download, then relaunches so it runs against the new bundle. |
+
+## Quickstart (5 minutes)
+
+Just want to *see it run*? The fastest path needs no simulators — it exercises
+the self-hosted OTA backend and the standalone web target:
+
+```
+pnpm install
+pnpm --filter @ota-gateway/mobile export     # export all platforms + generate the OTA manifest
+docker compose up --build -d                  # the gateway, as two Docker containers
+```
+
+Then:
+
+- Open **http://localhost:3000** (dev) and **http://localhost:3001** (prod) in a
+  browser — that's the standalone web target, served by the same process that
+  serves OTA.
+- Hit the OTA manifest directly and note the **distinct update ids** for
+  identical bytes:
+
+  ```
+  curl -sD - -o /dev/null http://localhost:3000/api/v2/updates/manifest \
+    -H 'expo-platform: ios' -H 'expo-runtime-version: 1' -H 'expo-protocol-version: 1'
+  # repeat against :3001 — same bundle, different manifest id
+  ```
+
+That is the entire self-hosted OTA gateway, with no EAS. To go further — build
+the native hosts, embed the brownfield artifacts, and run the OTA
+delivery/reload demo on a simulator/emulator — follow the full runbook below.
 
 ## Canonical runbook
 

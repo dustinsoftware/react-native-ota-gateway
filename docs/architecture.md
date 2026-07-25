@@ -5,6 +5,42 @@ stack and a Callstack brownfield integration end to end. It is deliberately
 small: one Expo app, one demo backend (the app's own server), and two minimal
 native host apps.
 
+## System at a glance
+
+One source tree fans out to three targets; the two native hosts get their JS
+either from Metro (Mode A) or from the self-hosted gateway (Mode B). The
+gateway is the app's *own* Express server, run as two instances over one export
+so a single build can demonstrate a dev/prod environment split.
+
+```mermaid
+flowchart TD
+    RN["apps/mobile · one Expo SDK 55 / RN 0.83 source tree<br/>routes · OtaGate · providers · components"]
+
+    RN --> WEBBUILD["Standalone web build<br/>expo export web"]
+    RN --> NAT["Standalone native<br/>expo run:ios / run:android"]
+    RN --> ART["Brownfield artifacts<br/>iOS XCFramework · Android AAR"]
+
+    subgraph GW["Demo backend — the app's own Express server, run twice over one dist/"]
+        DEV["dev gateway<br/>OTA_ENVIRONMENT=development<br/>localhost:3000"]
+        PROD["prod gateway<br/>OTA_ENVIRONMENT=production<br/>localhost:3001"]
+    end
+
+    WEBBUILD --> GW
+
+    ART --> IOS["hosts/ios · Swift<br/>native tab bar + 1 RN surface"]
+    ART --> AND["hosts/android · Kotlin<br/>native tab bar + 1 RN surface"]
+
+    METRO["Metro dev server<br/>localhost:8081"]
+    METRO -->|"Mode A · Fast Refresh"| IOS
+    METRO -->|"Mode A · Fast Refresh"| AND
+    GW -->|"Mode B · OTA manifest + bundle"| IOS
+    GW -->|"Mode B · OTA manifest + bundle"| AND
+```
+
+The sections below break this down: the [monorepo layout](#monorepo-layout),
+the [dual-target model](#the-dual-target-model), [who talks to
+whom](#who-talks-to-whom), and the [Mode A / Mode B](#mode-a--mode-b) split.
+
 ## Monorepo layout
 
 ```
