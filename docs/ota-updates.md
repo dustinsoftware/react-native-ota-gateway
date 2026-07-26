@@ -18,8 +18,9 @@ static prefix `/api/v2/updates/static`, base-URL placeholder
 | Piece | Location | Role |
 | --- | --- | --- |
 | Export | `scripts/export-web.mjs` | Runs `expo export` for all platforms (web server output + native), then kills the process (Metro never exits on its own). |
-| Manifest generator | `scripts/generate-update-manifest.mjs` | Turns the native export's `metadata.json` into the storeVersion-2 update store (`dist/server/update-manifest.json`): the new update plus retained previous updates (`.ota-archive/`, default 3, `OTA_RETAIN_UPDATES`) and per-environment channel pointers repointed at the new export; copies every retained update's bundle + assets into `dist/client/`. |
-| Manifest route | `src/app/api/v2/updates/manifest+api.ts` | `expo-router` `+api.ts` route that serves the Protocol v1 manifest per request. |
+| Code-signing keys | `scripts/generate-code-signing-keys.mjs` | Generates the RSA keypair + self-signed certificate into `certs/` (`private-key.pem`, `certificate.pem`). A one-time per-clone setup step; both files are gitignored. See [Code signing](#code-signing). |
+| Manifest generator | `scripts/generate-update-manifest.mjs` | Turns the native export's `metadata.json` into the storeVersion-3 update store (`dist/server/update-manifest.json`): for each retained update it **materializes and signs the final per-environment manifest variants** (development + production) with the private key. The new update plus retained previous updates (`.ota-archive/`, default 3, `OTA_RETAIN_UPDATES`) and per-environment channel pointers repointed at the new export; copies every retained update's bundle + assets into `dist/client/`. |
+| Manifest route | `src/app/api/v2/updates/manifest+api.ts` | `expo-router` `+api.ts` route that selects this instance's pre-signed environment variant and serves its exact stored bytes verbatim, adding the `expo-signature` header. No request-time stamping or id derivation. |
 | Static mount | `server/index.ts` | `express.static` on `/api/v2/updates/static` (1-year `immutable`; safe via `?h=` busters). |
 | Launch gate | `src/components/ota-gate.tsx` + `src/utils/attempt-ota-update.ts` | Blocks first render while an update is fetched, per the embedded/stale/fresh policy. |
 | Reload | `src/utils/reload-app.ts` | Bridge reload under a brownfield host; `Updates.reloadAsync()` standalone. |
@@ -27,6 +28,12 @@ static prefix `/api/v2/updates/static`, base-URL placeholder
 ## The manifest route
 
 `src/app/api/v2/updates/manifest+api.ts` implements the Protocol v1 handshake.
+It is a **verbatim server**: the environment-specific manifest bytes and their
+signature are produced at export time (see [Code signing](#code-signing) and
+[Single build, two environments](#single-build-two-environments)), so the route
+does no stamping, id derivation, or signing of its own -- it selects the right
+pre-signed variant and streams its stored bytes untouched.
+
 On `GET` it reads the request headers `expo-platform`, `expo-runtime-version`,
 `expo-protocol-version`, then:
 
@@ -34,7 +41,7 @@ On `GET` it reads the request headers `expo-platform`, `expo-runtime-version`,
 - `expo-protocol-version` not `1` -> **406** (`Unsupported protocol version`).
 - No `dist/server/update-manifest.json` on disk -> **204** (no update; normal on
   first deploy).
-- Store `storeVersion` != 2 -> **500** (a deploy bug: the image is rebuilt with
+- Store `storeVersion` != 3 -> **500** (a deploy bug: the image is rebuilt with
   every export, so there is no migration case). Empty `updates` -> **204**.
 - **Update selection**: `OTA_UPDATE_PIN` (a per-instance override naming a
   retained update key -- the rollback/canary lever) wins; otherwise this
@@ -44,69 +51,178 @@ On `GET` it reads the request headers `expo-platform`, `expo-runtime-version`,
 - Selected update's `runtimeVersion` != the client's `expo-runtime-version` ->
   **204** (the client's native runtime is incompatible with this bundle).
 - No manifest for the requested platform -> **204**.
+- No stored variant for this instance's environment -> **204**, loudly logged
+  (the same withhold polarity as the pre-signing era's missing-gateway case; the
+  export fails before shipping a store that lacks a required variant).
 - Otherwise -> **200** `multipart/mixed` with the manifest part
-  (`Content-Disposition: form-data; name="manifest"`), boundary
-  `expo-update-response`, and the protocol response headers
-  (`expo-protocol-version: 1`, `expo-sfv-version: 0`,
-  `cache-control: private, max-age=0`).
+  (`Content-Disposition: form-data; name="manifest"`) carrying the stored body
+  **byte-for-byte**, boundary `expo-update-response`, the protocol response
+  headers (`expo-protocol-version: 1`, `expo-sfv-version: 0`,
+  `cache-control: private, max-age=0`), and the **`expo-signature`** response
+  header (structured field `sig="<base64>", keyid="main"`) that authenticates the
+  served bytes. The body must be served exactly as stored -- re-serializing it
+  would change the bytes the signature covers and fail client verification.
 
 ## Single build, two environments
 
 The core design constraint: **one exported build serves both environments**. The
 dev server (`:3000`) and prod server (`:3001`) read the *same* `dist/`. Baking a
 concrete gateway host at export time would make an export correct for only one
-environment. Two mechanisms keep one build correct for both.
+environment. The generator therefore materializes, for each retained update and
+each platform, **both pre-resolved environment variants** and the route picks the
+one matching its `OTA_ENVIRONMENT`.
 
-### 1. Placeholder stamping at request time
+Because a signature must cover the *exact* bytes served (see
+[Code signing](#code-signing)), the two mechanisms that used to run per request
+-- placeholder stamping and per-environment id derivation -- both move to **export
+time**, where the private key is present. The route no longer transforms the
+manifest at all; it serves stored bytes verbatim.
 
-`generate-update-manifest.mjs` never resolves a concrete host. Everywhere a base
-URL appears -- launch-asset URL, every asset URL, `updates.url`, and
-`extra.gatewayUrl` in the embedded expo config -- it stamps the placeholder
-token `__OTA_GATEWAY_BASE_URL__`. It also bakes, into
-each stored update entry, the placeholder plus the full
-`gatewayUrls` map (`{ development: http://localhost:3000, production:
-http://localhost:3001 }`, from `app.json`).
+### 1. Placeholder stamping at export time
 
-At request time the manifest route resolves the base from `OTA_ENVIRONMENT`
-(`production` -> the prod host, anything else -> dev; the same strict
-`=== 'production'` polarity used server-side) and replaces **every** occurrence
-of the placeholder before responding. A bundle applied via OTA therefore talks
-to the same environment that served it.
+`generate-update-manifest.mjs` builds each platform manifest once with the
+placeholder token `__OTA_GATEWAY_BASE_URL__` everywhere a base URL appears --
+launch-asset URL, every asset URL, `updates.url`, and `extra.gatewayUrl` in the
+embedded expo config. It then reads the `gatewayUrls` map (`{ development:
+http://localhost:3000, production: http://localhost:3001 }`, from `app.json`) and,
+for **each** environment, replaces every occurrence of the placeholder with that
+environment's host, producing a final manifest JSON string. Each variant's exact
+bytes are then signed with the private key and stored as `{ body, signature }`.
 
-If a manifest carries the placeholder but no gateway resolves for the running
-environment, the route logs and **withholds the update (204)** rather than hand
-out a broken host. The export itself fails if `gatewayUrls` is missing either
-environment, so a placeholder is never shipped that can never resolve.
+At serve time the manifest route resolves the environment from `OTA_ENVIRONMENT`
+(`production` -> the prod variant, anything else -> dev; the same strict
+`=== 'production'` polarity used server-side) and returns that variant's stored
+`body` and `signature` untouched. A bundle applied via OTA therefore talks to the
+same environment that served it, and the served bytes match their signature
+exactly.
+
+The export **fails** if `gatewayUrls` is missing either environment, so a store
+is never shipped that lacks a variant the route might be asked for. If -- despite
+that -- no variant exists for the running environment, the route logs and
+**withholds the update (204)** rather than hand out an unsigned or wrong-host body
+(the same withhold polarity as before).
 
 `OTA_GATEWAY_URL` (build-time) remains an escape hatch for one-off exports pinned
-to a concrete host: it omits the placeholder, and the route then serves the
-manifest verbatim.
+to a concrete host: the generator emits a **single** pre-signed variant with the
+placeholder already replaced by that host, and the route serves it regardless of
+`OTA_ENVIRONMENT`.
 
 ### 2. Per-environment update-id derivation
 
 The **baked** update id identifies bundle *content*, so both environments would
-otherwise serve the *same* id with *different* gateway URLs. **expo-updates
+otherwise carry the *same* id with *different* gateway URLs. **expo-updates
 treats update ids as globally unique.** A client that cached an update while
 pointed at one environment and then receives the same id from the other logs
 "this is a server error", rewrites the stored update's scope key, and relaunches
 the **cached** manifest -- so the embedded config (including the gateway URL)
 never follows a host-environment switch.
 
-To prevent that, the route re-derives the served id per environment:
+To prevent that, the generator derives each variant's served id per environment,
+before signing, so the id is part of the signed bytes:
 
 ```
 deriveEnvironmentUpdateId(bakedId, base) =
     SHA-256( bakedId + "\n" + resolvedGatewayBase )  -> first 128 bits -> UUID
 ```
 
-Deterministic per `(build, environment)`, and the two environments can never
-share one id. Assets are still deduplicated client-side by content hash, so
-re-pointing to the other environment only inserts a new update row on the device
--- it does **not** re-download the bundle.
+The formula is unchanged from the request-time era; only its location moved (from
+the route into the generator). It is deterministic per `(build, environment)`, and
+the two environments can never share one id. Assets are still deduplicated
+client-side by content hash, so re-pointing to the other environment only inserts
+a new update row on the device -- it does **not** re-download the bundle.
 
 The baked id itself is `hashToUUID(bundleContentHash)` in the generator:
 same bundle content always yields the same baked id (avoids needless
-re-downloads); the route derives from it.
+re-downloads); each variant's id derives from it.
+
+Retained/archived updates are **re-materialized and re-signed on every export**
+(the key is present at export time), so a rollback target's variants stay
+correctly signed even though its bundle was built by an earlier export.
+
+## Code signing
+
+The manifest and its assets already carry SHA-256 hashes: the client checks each
+downloaded asset's bytes against the hash in the manifest. That is **integrity**
+-- the assets match the manifest -- but not **authenticity**: it says nothing
+about *who authored the manifest*. Anyone who controls the serving path (the
+gateway container, the deploy pipeline, a CDN in front, DNS) can compose a
+self-consistent malicious manifest -- correct hashes over attacker-chosen bytes --
+and every device that fetches it runs the attacker's JS. Hash integrity cannot
+detect this, because the attacker recomputes the hashes.
+
+Code signing closes that gap using the **Expo Updates Protocol v1
+`expo-signature`** mechanism. The generator signs each served manifest with an
+RSA private key; every host verifies the signature against a certificate baked
+into the binary at build time. The trust anchor shrinks to a single private key
+that lives only where exports run (a dev machine or CI) and **never touches the
+serving containers, the CDN, or DNS** -- so compromising the serving path is no
+longer enough to push code to devices.
+
+The failure mode keeps the design's freeze-not-break polarity: if a signature
+does not verify (wrong key, tampered bytes, no signature), the client **rejects
+the update and keeps running its current bundle** -- the same outcome as a
+`runtimeVersion` mismatch or an offline check.
+
+### Keys are required
+
+`scripts/generate-code-signing-keys.mjs` generates an RSA keypair and a
+self-signed certificate into `apps/mobile/certs/`:
+
+| File | Purpose |
+| --- | --- |
+| `certs/private-key.pem` | Signs manifests at export time. Never leaves the machine that exports. |
+| `certs/certificate.pem` | Baked into the binary; verifies signatures on-device. |
+
+**Both files are gitignored.** This is a public template with no shared key, so
+every clone generates its own pair (run the setup script once after cloning; see
+[development-workflow.md](./development-workflow.md)). The keyid is `main` and the
+algorithm is `rsa-v1_5-sha256`. Export **and** prebuild fail loudly, pointing at
+the setup script, when the key material is missing -- there is no unsigned mode.
+
+### Client side
+
+`app.json`'s `updates` block carries:
+
+```jsonc
+"codeSigningCertificate": "./certs/certificate.pem",
+"codeSigningMetadata": { "keyid": "main", "alg": "rsa-v1_5-sha256" }
+```
+
+`expo prebuild` bakes these into the native projects:
+
+- **iOS `Expo.plist`**: `EXUpdatesCodeSigningCertificate` (the certificate PEM)
+  and `EXUpdatesCodeSigningMetadata` (the keyid/alg dictionary).
+- **Android manifest meta-data**: `expo.modules.updates.CODE_SIGNING_CERTIFICATE`
+  and `expo.modules.updates.CODE_SIGNING_METADATA`.
+
+With a certificate configured, expo-updates sends an `expo-expect-signature`
+request header (`sig, keyid="main", alg="rsa-v1_5-sha256"`) on every update
+request and **rejects any manifest whose `expo-signature` response header does
+not verify** against the embedded certificate.
+
+### Export-time pre-signing
+
+Because the signature covers the exact served bytes, signing happens where the
+private key lives -- at export time, not per request. For each retained update and
+each platform, `generate-update-manifest.mjs`:
+
+1. materializes the two pre-resolved environment variants (development and
+   production) -- final manifest JSON strings with the placeholder already
+   replaced and the per-environment update id already derived (see
+   [Single build, two environments](#single-build-two-environments));
+2. signs each variant's exact bytes with the private key;
+3. stores, per variant, `{ body, signature }` -- `body` being the exact JSON
+   string and `signature` its base64 RSA signature.
+
+The store bumps to **storeVersion 3** to carry these per-variant bodies +
+signatures. A concrete `OTA_GATEWAY_URL` export produces a single pre-signed
+variant instead of two.
+
+The manifest route then does no cryptography: it selects this instance's variant,
+serves `body` verbatim in the multipart part, and sets `expo-signature: sig="<the
+stored base64>", keyid="main"`. Serving the stored bytes untouched is essential --
+any re-serialization would change the signed bytes and fail verification on every
+device.
 
 ## Content-addressed launch asset
 
@@ -209,12 +325,13 @@ re-export, Check -> Download -> Restart, watch it change to `v2` with
 ## Related docs
 
 - [configuration.md](./configuration.md) -- `OTA_ENVIRONMENT`, the gateway map,
-  the runtime host-environment seam that decides which gateway the app's own
-  requests use.
+  the code-signing key/cert locations and required-keys policy, the runtime
+  host-environment seam that decides which gateway the app's own requests use.
 - [brownfield.md](./brownfield.md) -- how the host rebuilds the RN root on a
-  reload message, and how expo-updates config is overridden per environment.
+  reload message, how expo-updates config is overridden per environment, and how
+  the code-signing keys survive the `Expo.plist` override / AAR manifest merge.
 - [architecture.md](./architecture.md) -- where the servers sit in the system.
 - [version-skew.md](./version-skew.md) -- what happens when the JS bundle and
   the host binary are at different versions: current freeze/fail-open
-  behavior, and the (design-only) conditional-fallback and update-required
-  strategies.
+  behavior, code-signing certificate rotation, and the (design-only)
+  conditional-fallback and update-required strategies.

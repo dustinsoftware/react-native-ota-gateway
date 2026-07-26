@@ -47,6 +47,15 @@ is an outage, so the client fails toward production.
   `plugins/withBrownfieldUpdates.js` to write the per-environment plist keys /
   Kotlin enum.
 
+Independently of `app.config.ts`, `app.json`'s static `updates` block carries the
+**code-signing** config (`codeSigningCertificate: "./certs/certificate.pem"`,
+`codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" }`). `expo prebuild`
+bakes it into iOS `Expo.plist` (`EXUpdatesCodeSigningCertificate` /
+`EXUpdatesCodeSigningMetadata`) and the Android manifest meta-data
+(`expo.modules.updates.CODE_SIGNING_CERTIFICATE` /
+`...CODE_SIGNING_METADATA`), so every host verifies manifest signatures against
+the certificate it shipped with. See [ota-updates.md](./ota-updates.md#code-signing).
+
 | Variable | Effect |
 | --- | --- |
 | `OTA_ENVIRONMENT` | `development` -> the dev gateway; anything else (incl. unset / `production`) -> production. |
@@ -89,8 +98,31 @@ resolves the BFF/gateway base with this precedence:
 | Baked default gateway | `app.json`/prebuild: `updates.url`, `extra.gatewayUrl` | `app.config.ts` from `OTA_ENVIRONMENT` / `OTA_GATEWAY_URL` |
 | Both env manifest URLs (iOS) | `Expo.plist`: `OtaUpdatesURLDevelopment`, `OtaUpdatesURLProduction` (+ default `EXUpdatesURL`) | `plugins/withBrownfieldUpdates.js` |
 | Both env manifest URLs (Android) | generated `ReactNativeHostManager.kt`: `OtaUpdatesEnvironment` enum | `plugins/withBrownfieldUpdates.js` |
+| Code-signing keypair + cert | `apps/mobile/certs/` (`private-key.pem`, `certificate.pem`; gitignored) | `scripts/generate-code-signing-keys.mjs` |
+| Baked verify cert (iOS) | `Expo.plist`: `EXUpdatesCodeSigningCertificate`, `EXUpdatesCodeSigningMetadata` | `expo prebuild` from `app.json` `updates` |
+| Baked verify cert (Android) | manifest meta-data: `expo.modules.updates.CODE_SIGNING_CERTIFICATE`, `...CODE_SIGNING_METADATA` | `expo prebuild` from `app.json` `updates` |
 | Live host environment | `modules/host-environment` (native -> JS) | Host, via the plugin-injected init entry point |
 | Runtime gateway resolution | `src/api/gateway-url.ts` | Reads host env first, then bake, then prod |
+
+## Code-signing keys
+
+The OTA manifest is signed so hosts can prove it was authored by whoever holds
+the private key, not merely that its asset hashes are self-consistent (the threat
+model is in [ota-updates.md](./ota-updates.md#code-signing)). The keys are a
+**required, per-clone** setup step, not a secret shared through this repo:
+
+- `scripts/generate-code-signing-keys.mjs` generates an RSA keypair + self-signed
+  certificate into `apps/mobile/certs/` (`private-key.pem`, `certificate.pem`).
+  Run it **once after cloning**.
+- **Both files are gitignored.** This is a public template with no shared key, so
+  every clone signs with its own pair; a host only ever verifies against the
+  certificate baked into *its own* build.
+- `private-key.pem` signs manifests at export time and must never leave the
+  export machine (dev box / CI). `certificate.pem` is baked into the binary at
+  prebuild and does the on-device verification.
+- keyid is `main`, algorithm is `rsa-v1_5-sha256`.
+- **Export and prebuild fail loudly** -- pointing at the setup script -- when the
+  key material is missing. There is no unsigned mode.
 
 ## Server environment variables
 
@@ -99,14 +131,15 @@ The demo backend (`apps/mobile/server`) reads exactly two:
 | Variable | Purpose |
 | --- | --- |
 | `PORT` | Which port the instance listens on. `server:dev` sets `3000`, `server:prod` sets `3001`; the Docker `gateway-dev`/`gateway-prod` services (the required Mode B serving) set the same values in `docker-compose.yml`. |
-| `OTA_ENVIRONMENT` | Which gateway host the manifest route advertises, and which per-environment update id it derives. `production` -> prod host; anything else -> dev (strict `=== 'production'`). `server:prod` sets `production`; `server:dev` leaves it unset/`development`. |
+| `OTA_ENVIRONMENT` | Which pre-signed manifest variant the route serves (and thus which gateway host and update id the client sees). `production` -> the prod variant; anything else -> dev (strict `=== 'production'`). `server:prod` sets `production`; `server:dev` leaves it unset/`development`. |
 
 Both instances read the **same** `dist/` export. `OTA_ENVIRONMENT` is the only
-difference between them, and flipping it flips both the placeholder host stamped
-into the manifest **and** the derived update id -- which is exactly the seam this
-demo exists to prove. The manifest is read per request, so re-exporting needs no
-server restart. The server leaves the listen host unspecified so Node uses a
-dual-stack socket where available; this is required because iOS Simulator
+difference between them, and flipping it flips which pre-signed variant is served
+-- and therefore both the gateway host baked into the manifest **and** the update
+id (each derived and signed at export time) -- which is exactly the seam this
+demo exists to prove. The manifest store is read per request, so re-exporting
+needs no server restart. The server leaves the listen host unspecified so Node
+uses a dual-stack socket where available; this is required because iOS Simulator
 resolves `localhost` to `::1`, while Android port reversal and physical-device
 access use IPv4.
 
@@ -116,19 +149,21 @@ This is the server-side half of "one build serves both environments", covered in
 full in [ota-updates.md](./ota-updates.md):
 
 - **Build.** `scripts/generate-update-manifest.mjs` stamps the placeholder
-  `__OTA_GATEWAY_BASE_URL__` everywhere a base URL appears and bakes the
-  `gatewayUrls` map into `dist/server/update-manifest.json`. `OTA_ENVIRONMENT`
-  has no effect at this step.
-- **Serve.** `src/app/api/v2/updates/manifest+api.ts` resolves the base from
-  `OTA_ENVIRONMENT` per request, swaps every placeholder, and derives a
-  per-environment update id (SHA-256 of the baked id + resolved base -> UUID) so
-  the two environments never serve the same id with different URLs. No gateway
-  resolves -> the update is withheld (204) rather than served broken.
+  `__OTA_GATEWAY_BASE_URL__` everywhere a base URL appears, then materializes both
+  environment variants (placeholder replaced, per-environment update id derived --
+  SHA-256 of the baked id + resolved base -> UUID) and **signs each variant** with
+  the private key into `dist/server/update-manifest.json` (storeVersion 3).
+  `OTA_ENVIRONMENT` has no effect at this step.
+- **Serve.** `src/app/api/v2/updates/manifest+api.ts` resolves the environment
+  from `OTA_ENVIRONMENT` per request, selects that pre-signed variant, and serves
+  its stored bytes verbatim with the matching `expo-signature` header. No
+  placeholder swap or id derivation happens at serve time. No variant resolves ->
+  the update is withheld (204) rather than served broken.
 
 ## Related docs
 
 - [ota-updates.md](./ota-updates.md) -- placeholder stamping, per-env id
-  derivation, the manifest route in detail.
+  derivation, export-time code signing, the manifest route in detail.
 - [brownfield.md](./brownfield.md) -- how the host publishes its environment and
   how the plugin wires the per-environment update URLs.
 - [architecture.md](./architecture.md) -- the two-server topology.

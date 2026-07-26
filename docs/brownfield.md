@@ -80,7 +80,10 @@ A thin wrapper around `brownfield package:ios --scheme OtaGatewayLib
   of macOS runner time.
 - **Copies `Expo.plist`** (expo-updates config) into the package output. The CLI
   does not. Verify the slug-derived source path after the first prebuild
-  (expected `ios/otagatewayapp/Supporting/Expo.plist`).
+  (expected `ios/otagatewayapp/Supporting/Expo.plist`). The copied plist must
+  include the code-signing keys (`EXUpdatesCodeSigningCertificate` /
+  `EXUpdatesCodeSigningMetadata`) prebuild baked into it, or the host ships
+  without a verify cert (see [ota-updates.md](./ota-updates.md#code-signing)).
 - **Harvests dSYMs** -- forces `DEBUG_INFORMATION_FORMAT=dwarf-with-dsym` and
   copies the standalone dSYMs into the build output, so the native surface (all
   statically linked into `OtaGatewayLib`) can be debugged in the host.
@@ -132,11 +135,21 @@ JS layer before RN boots.
 - **iOS `Expo.plist`** -- writes both environments' manifest URLs,
   `OtaUpdatesURLDevelopment` and `OtaUpdatesURLProduction`, alongside the
   build-selected default `EXUpdatesURL`. The plist ships with the XCFramework.
+  The plist also carries the code-signing keys baked by prebuild
+  (`EXUpdatesCodeSigningCertificate`, `EXUpdatesCodeSigningMetadata`; see
+  [ota-updates.md](./ota-updates.md#code-signing)) -- these must ride along in the
+  copied plist and survive the `overrideConfiguration` below, or the host starts
+  expo-updates without a verify cert.
 - **iOS `ios/OtaGatewayLib/OtaGatewayLib.swift`** -- injects an
   `OtaUpdatesEnvironment` enum and an `initializeUpdates(environment:)` entry
   point into the CLI-generated stub. It reads the per-environment URL from
   `Expo.plist` and applies it via `AppController.overrideConfiguration` **before**
-  the updates controller is created, then starts the controller. It also:
+  the updates controller is created, then starts the controller. Because the
+  override replaces the config the controller reads, it must carry the
+  code-signing keys (`EXUpdatesCodeSigningCertificate` /
+  `EXUpdatesCodeSigningMetadata`) forward from `Expo.plist` alongside the URL --
+  dropping them there would disable signature verification even though the plist
+  defines them. It also:
   - publishes the host's selection to the JS layer via
     `HostEnvironmentRegistry` (`modules/host-environment`), so
     `src/api/gateway-url.ts` resolves the gateway from the live host selection
@@ -164,9 +177,15 @@ JS layer before RN boots.
   `initialize(application, environment, onJSBundleLoaded)` entry point. That
   entry point applies a full expo-updates config
   (`enabled`, `updateUrl`, `runtimeVersion`, `checkOnLaunch`, `launchWaitMs`,
-  `hasEmbeddedUpdate`) via `UpdatesController.overrideConfiguration` before the
+  `hasEmbeddedUpdate`, plus the code-signing certificate + metadata) via
+  `UpdatesController.overrideConfiguration` before the
   RN host boots, and publishes the selection to the JS layer via
-  `HostEnvironment` (`modules/host-environment`).
+  `HostEnvironment` (`modules/host-environment`). The code-signing meta-data
+  (`expo.modules.updates.CODE_SIGNING_CERTIFICATE` / `...CODE_SIGNING_METADATA`)
+  is baked into the library manifest at prebuild and must survive the AAR ->
+  host manifest merge; the override must carry it forward too, or the controller
+  starts without a verify cert (see
+  [ota-updates.md](./ota-updates.md#code-signing)).
 
 The environment parameter is **required** on both platforms -- there is no
 environment-less entry point. On iOS an environment-less path was a

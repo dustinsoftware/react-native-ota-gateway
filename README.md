@@ -85,7 +85,7 @@ before working on a subsystem, and keep it current with any change (see
 | Doc | Covers |
 | --- | --- |
 | [docs/architecture.md](./docs/architecture.md) | Monorepo layout, the dual-target model, who talks to whom, the Mode A/B matrix per platform. |
-| [docs/ota-updates.md](./docs/ota-updates.md) | Self-hosted Expo Updates Protocol v1: manifest route, per-env update-id derivation, placeholder stamping, content-addressed assets, `OtaGate`, bridge reload. |
+| [docs/ota-updates.md](./docs/ota-updates.md) | Self-hosted Expo Updates Protocol v1: manifest route, per-env update-id derivation, placeholder stamping, content-addressed assets, export-time manifest code signing, `OtaGate`, bridge reload. |
 | [docs/brownfield.md](./docs/brownfield.md) | Packaging pipeline, the two config plugins, the full iOS + Android host-integration recipe, gotchas. |
 | [docs/configuration.md](./docs/configuration.md) | The environment model: `OTA_ENVIRONMENT`, the runtime host-environment seam, the gateway map, where each value lives. |
 | [docs/development-workflow.md](./docs/development-workflow.md) | Prerequisites, Mode A/B steps per platform, the runbook, verification. |

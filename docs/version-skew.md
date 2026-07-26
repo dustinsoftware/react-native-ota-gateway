@@ -37,6 +37,24 @@ Two properties follow:
   update -- which is exactly why the *soft* mechanisms in Part 2 exist: the
   bump is the last resort, not the tool of first resort.
 
+### Code-signing certificate rotation
+
+The manifest code-signing certificate (see
+[ota-updates.md](./ota-updates.md#code-signing)) is baked into the binary at
+build time, so a host **verifies against the certificate it shipped with,
+forever**. Rotating the signing key therefore behaves exactly like the
+`runtimeVersion` fence:
+
+- A new certificate requires a **new binary**. Hosts already in the field cannot
+  learn a new public key over the air.
+- If you re-sign updates with a new key, hosts built against the old certificate
+  **reject the newly-signed manifest and freeze** on their current bundle -- they
+  do not break. Same freeze-not-break polarity as a runtime mismatch.
+
+Practically: rotate the key only alongside a `runtimeVersion` bump / app-store
+release, and -- if old `runtimeVersions` must keep receiving updates -- keep
+signing those with the **old** key until their population has drained.
+
 ### Fail-open update gating
 
 `OtaGate` (`src/components/ota-gate.tsx`) blocks first render only on an

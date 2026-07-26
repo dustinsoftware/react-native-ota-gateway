@@ -15,6 +15,21 @@ root with `pnpm`; native builds run from the host directories.
 | JDK 17 | Android build | The host mirrors the generated project's toolchain. |
 | Android SDK (compileSdk 36, an emulator) | Android host build + run | Gradle 8.14.4, minSdk 24. |
 
+### First-time setup: code-signing keys
+
+Before the **first export or prebuild**, generate the OTA code-signing keys:
+
+```
+cd apps/mobile && node scripts/generate-code-signing-keys.mjs
+```
+
+This writes `apps/mobile/certs/private-key.pem` + `certificate.pem` (both
+gitignored -- every clone makes its own pair; there is no shared key). The
+manifest generator signs each export with the private key and prebuild bakes the
+certificate into the hosts, so **export and prebuild fail loudly** until the keys
+exist. Run it once per clone; see [ota-updates.md](./ota-updates.md#code-signing)
+and [configuration.md](./configuration.md#code-signing-keys).
+
 ## Root scripts
 
 - `pnpm --filter @ota-gateway/mobile start` -- Metro dev server (`:8081`).
@@ -197,9 +212,10 @@ run before the ones marked `no self-warm cycle`:
 End-to-end verification order:
 
 ```
+0  cd apps/mobile && node scripts/generate-code-signing-keys.mjs  # once per clone, before first export/prebuild
 1  pnpm install
 1b pnpm typecheck && pnpm test                     # type check + Vitest unit suites (the CI gate)
-2  pnpm --filter @ota-gateway/mobile export        # export-web.mjs (all platforms) + manifest
+2  pnpm --filter @ota-gateway/mobile export        # export-web.mjs (all platforms) + signed manifest
 3  docker compose up --build -d              # gateway containers (Mode B serving)
 4  browser: standalone web on :3000; curl manifests on :3000/:3001 -- distinct update ids
 4b standalone native spot-check: npx expo run:ios / run:android
@@ -229,9 +245,11 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
 
 Both should return `200 multipart/mixed`, and the manifest `id` fields **must
 differ** between `:3000` and `:3001` for identical bytes (the per-environment id
-seam). The launch-asset URL should `200`, and its host should match the port that
-served it. A wrong `expo-runtime-version` returns `204`; a missing/invalid
-`expo-platform` returns `400`.
+seam). Each response also carries an `expo-signature` header
+(`sig="<base64>", keyid="main"`) authenticating the served bytes. The launch-asset
+URL should `200`, and its host should match the port that served it. A wrong
+`expo-runtime-version` returns `204`; a missing/invalid `expo-platform` returns
+`400`.
 
 ## OTA delivery proof
 
@@ -276,7 +294,7 @@ Each implementation phase is traceable to a doc section; verify against it.
 
 | Phase | Verify |
 | --- | --- |
-| Scaffold + app port | `pnpm install`; `pnpm typecheck`; `pnpm test` (all unit suites green); prebuild both platforms; grep generated Swift for `initializeUpdates` + `bundleURLOverride`, Kotlin for `OtaUpdatesEnvironment` + private `bootReactNative`, `build.gradle.kts` for `singleVariant("release")` + brotli; `Expo.plist` has both `OtaUpdatesURL*` keys. |
+| Scaffold + app port | `pnpm install`; `pnpm typecheck`; `pnpm test` (all unit suites green); prebuild both platforms; grep generated Swift for `initializeUpdates` + `bundleURLOverride`, Kotlin for `OtaUpdatesEnvironment` + private `bootReactNative`, `build.gradle.kts` for `singleVariant("release")` + brotli; `Expo.plist` has both `OtaUpdatesURL*` keys and the `EXUpdatesCodeSigningCertificate` / `EXUpdatesCodeSigningMetadata` keys (Android manifest meta-data has the matching `expo.modules.updates.CODE_SIGNING_*` entries). |
 | Unit tests + CI | `pnpm typecheck` and `pnpm test` pass locally and in `.github/workflows/ci.yml`; the drift-guard suite ties plugin constants, `app.json`, the native host sources, and the Android AAR coordinate together, so a cross-layer rename fails here. |
 | Demo backend | Export -> `docker compose up --build -d` -> web loads on `:3000`/`:3001`; curl manifests (above) -- 200 multipart, ids differ, launch asset 200s, wrong runtime -> 204, missing platform -> 400. Standalone native boots via `expo run:ios`/`run:android`; standalone reload uses `Updates.reloadAsync()`. |
 | Android artifact + host | assembleDebug -> install -> reverses -> Mode B (embedded bundle loads; check/download/restart lands); env toggle + relaunch -> different update id; Mode A (toggle + relaunch + Metro, Fast Refresh works). |
