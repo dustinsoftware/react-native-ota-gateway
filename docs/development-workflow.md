@@ -245,8 +245,10 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
 
 Both should return `200 multipart/mixed`, and the manifest `id` fields **must
 differ** between `:3000` and `:3001` for identical bytes (the per-environment id
-seam). Each response also carries an `expo-signature` header
-(`sig="<base64>", keyid="main"`) authenticating the served bytes. The launch-asset
+seam). Each response also carries an `expo-signature` value
+(`sig="<base64>", keyid="main"`) authenticating the served bytes -- on the
+manifest part's headers (where the expo-updates client reads it for multipart
+responses) and mirrored as an HTTP header. The launch-asset
 URL should `200`, and its host should match the port that served it. A wrong
 `expo-runtime-version` returns `204`; a missing/invalid `expo-platform` returns
 `400`.

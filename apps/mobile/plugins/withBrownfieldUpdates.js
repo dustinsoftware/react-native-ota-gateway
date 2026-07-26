@@ -158,7 +158,19 @@ const INITIALIZE_UPDATES = `
     if let plistPath = Bundle.main.path(forResource: "Expo", ofType: "plist"),
        let plist = NSDictionary(contentsOfFile: plistPath),
        let updateUrl = plist[key] as? String {
-      AppController.overrideConfiguration(configuration: ["EXUpdatesURL": updateUrl])
+      // overrideConfiguration MERGES onto Expo.plist, so the code-signing keys
+      // baked there (EXUpdatesCodeSigningCertificate / EXUpdatesCodeSigningMetadata)
+      // survive today. Carry them forward EXPLICITLY anyway so a future change
+      // to the merge semantics cannot silently disable signature verification
+      // (see docs/ota-updates.md#code-signing).
+      var configuration: [String: Any] = ["EXUpdatesURL": updateUrl]
+      if let certificate = plist["EXUpdatesCodeSigningCertificate"] {
+        configuration["EXUpdatesCodeSigningCertificate"] = certificate
+      }
+      if let metadata = plist["EXUpdatesCodeSigningMetadata"] {
+        configuration["EXUpdatesCodeSigningMetadata"] = metadata
+      }
+      AppController.overrideConfiguration(configuration: configuration)
     } else {
       NSLog("[OtaGatewayLib] %@ missing from Expo.plist; using its default EXUpdatesURL", key)
     }
@@ -360,6 +372,13 @@ enum class OtaUpdatesEnvironment(internal val updateUrl: String) {
         HostEnvironment.configure(
             if (environment == OtaUpdatesEnvironment.PRODUCTION) "production" else "development",
         )
+        // The override map intentionally omits the code-signing keys: when a key
+        // is absent from the override, UpdatesConfiguration falls back to the
+        // host manifest meta-data (expo.modules.updates.CODE_SIGNING_CERTIFICATE /
+        // ...CODE_SIGNING_METADATA) that prebuild bakes into the AAR and the
+        // Android manifest merger carries into the host app. So the override
+        // does NOT clobber signature verification -- the baked certificate keeps
+        // authenticating manifests (see docs/ota-updates.md#code-signing).
         UpdatesController.overrideConfiguration(
             application,
             mapOf(

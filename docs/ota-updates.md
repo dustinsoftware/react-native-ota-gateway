@@ -56,11 +56,15 @@ On `GET` it reads the request headers `expo-platform`, `expo-runtime-version`,
   export fails before shipping a store that lacks a required variant).
 - Otherwise -> **200** `multipart/mixed` with the manifest part
   (`Content-Disposition: form-data; name="manifest"`) carrying the stored body
-  **byte-for-byte**, boundary `expo-update-response`, the protocol response
+  **byte-for-byte**, boundary `expo-update-response`, and the protocol response
   headers (`expo-protocol-version: 1`, `expo-sfv-version: 0`,
-  `cache-control: private, max-age=0`), and the **`expo-signature`** response
-  header (structured field `sig="<base64>", keyid="main"`) that authenticates the
-  served bytes. The body must be served exactly as stored -- re-serializing it
+  `cache-control: private, max-age=0`). The **`expo-signature`** header
+  (structured field `sig="<base64>", keyid="main"`) that authenticates the served
+  bytes is emitted **on the manifest part itself** -- for multipart responses the
+  expo-updates client reads the signature from the part headers, not the
+  top-level HTTP headers (it only consults the HTTP header for non-multipart
+  responses). The route also mirrors it as an HTTP header for `curl`
+  convenience. The body must be served exactly as stored -- re-serializing it
   would change the bytes the signature covers and fail client verification.
 
 ## Single build, two environments
@@ -197,8 +201,10 @@ the setup script, when the key material is missing -- there is no unsigned mode.
 
 With a certificate configured, expo-updates sends an `expo-expect-signature`
 request header (`sig, keyid="main", alg="rsa-v1_5-sha256"`) on every update
-request and **rejects any manifest whose `expo-signature` response header does
-not verify** against the embedded certificate.
+request and **rejects any manifest whose `expo-signature` does
+not verify** against the embedded certificate. For the multipart responses this
+server always produces, the client reads `expo-signature` from the **manifest
+part's headers**, not the top-level HTTP response headers.
 
 ### Export-time pre-signing
 
@@ -219,8 +225,10 @@ signatures. A concrete `OTA_GATEWAY_URL` export produces a single pre-signed
 variant instead of two.
 
 The manifest route then does no cryptography: it selects this instance's variant,
-serves `body` verbatim in the multipart part, and sets `expo-signature: sig="<the
-stored base64>", keyid="main"`. Serving the stored bytes untouched is essential --
+serves `body` verbatim in the multipart part, and emits `expo-signature:
+sig="<the stored base64>", keyid="main"` as a **part header** on that manifest
+part (where the client looks for it in multipart responses; it is mirrored as an
+HTTP header too). Serving the stored bytes untouched is essential --
 any re-serialization would change the signed bytes and fail verification on every
 device.
 

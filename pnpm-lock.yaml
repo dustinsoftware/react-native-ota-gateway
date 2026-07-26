@@ -98,6 +98,9 @@ importers:
       '@callstack/brownfield-cli':
         specifier: 3.6.1
         version: 3.6.1(@react-native-community/cli-config-android@20.2.0)(@react-native-community/cli-config@20.2.0(typescript@5.9.3))(typescript@5.9.3)
+      '@expo/code-signing-certificates':
+        specifier: 0.0.6
+        version: 0.0.6
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6

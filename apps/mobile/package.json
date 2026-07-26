@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@callstack/brownfield-cli": "3.6.1",
+    "@expo/code-signing-certificates": "0.0.6",
     "@types/express": "^5.0.6",
     "@types/react": "~19.2.2",
     "tsx": "^4.21.0",

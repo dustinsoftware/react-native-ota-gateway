@@ -9,7 +9,7 @@
  */
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 const PATCHES_DIR = join("patches");
@@ -63,12 +63,41 @@ const iosOnly = args.includes("--ios");
 const androidOnly = args.includes("--android");
 const platforms = iosOnly ? ["ios"] : androidOnly ? ["android"] : ["ios", "android"];
 
+/**
+ * `expo prebuild` bakes the OTA code-signing certificate into the native
+ * projects (iOS Expo.plist EXUpdatesCodeSigningCertificate, Android manifest
+ * meta-data expo.modules.updates.CODE_SIGNING_CERTIFICATE) from app.json's
+ * updates.codeSigningCertificate path. The config plugin throws a generic
+ * "File not found" if it is missing; check first and fail with a pointer at the
+ * setup script instead. There is no unsigned mode -- see
+ * docs/ota-updates.md#code-signing.
+ */
+function ensureCodeSigningCertificate() {
+  const appJson = JSON.parse(readFileSync("app.json", "utf-8"));
+  const certRelPath = appJson.expo?.updates?.codeSigningCertificate;
+  if (!certRelPath) {
+    return;
+  }
+  if (!existsSync(certRelPath)) {
+    console.error(
+      `[prebuild] Missing OTA code-signing certificate: ${certRelPath}.\n`
+        + "  Run `node scripts/generate-code-signing-keys.mjs` first (once per clone).\n"
+        + "  There is no unsigned mode -- see docs/ota-updates.md#code-signing.",
+    );
+    process.exit(1);
+  }
+}
+
 function run(cmd) {
   console.log(`$ ${cmd}`);
   execSync(cmd, { stdio: "inherit" });
 }
 
-// 0. Ensure the brownfield Android library can detect the RN version.
+// 0. Fail loudly before regenerating native projects if the verify certificate
+// prebuild bakes into the hosts is missing.
+ensureCodeSigningCertificate();
+
+// 0b. Ensure the brownfield Android library can detect the RN version.
 if (platforms.includes("android")) {
   ensureReactNativeResolvable();
 }

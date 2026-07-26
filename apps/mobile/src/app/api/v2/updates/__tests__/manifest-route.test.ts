@@ -8,53 +8,31 @@ import { GET } from '../manifest+api';
 
 const mockReadFileSync = vi.mocked(readFileSync);
 
-const PLACEHOLDER = '__OTA_GATEWAY_BASE_URL__';
 const DEV_GATEWAY = 'https://dev.gateway.test';
 const PROD_GATEWAY = 'https://www.gateway.test';
-const IOS_BUNDLE = '_expo/static/js/ios/entry-ios.hbc';
-const ANDROID_BUNDLE = '_expo/static/js/android/entry-android.hbc';
 
-/** One platform manifest with placeholder-stamped, per-platform-distinct URLs. */
-function platformManifest(bundle: string): Record<string, unknown> {
+/**
+ * Build a pre-signed variant. The route serves `body` verbatim and copies
+ * `signature` into the expo-signature header, so the values here are opaque
+ * markers -- the route does no cryptography (signing happens at export time).
+ */
+function variant(marker: string): { body: string; signature: string } {
   return {
-    id: '00000000-0000-0000-0000-000000000000',
-    createdAt: '2026-07-14T00:00:00.000Z',
-    runtimeVersion: '1',
-    launchAsset: {
-      url: `${PLACEHOLDER}/api/v2/updates/static/${bundle}`,
-      contentType: 'application/javascript',
-      key: bundle.split('/').pop(),
-      hash: 'deadbeef',
-    },
-    assets: [
-      {
-        url: `${PLACEHOLDER}/api/v2/updates/static/assets/img`,
-        contentType: 'image/png',
-        key: 'img',
-        hash: 'cafebabe',
-        fileExtension: '.png',
-      },
-    ],
-    metadata: {},
-    extra: {
-      scopeKey: '@anonymous/ota-gateway-app',
-      otaAppVersion: '1.1.162-ac83861',
-      expoClient: {
-        updates: { url: `${PLACEHOLDER}/api/v2/updates/manifest` },
-        extra: { gatewayUrl: PLACEHOLDER },
-      },
-    },
+    body: JSON.stringify({ id: `id-${marker}`, gateway: marker, launchAsset: { url: `${marker}/x` } }),
+    signature: `sig="sig-${marker}", keyid="main"`,
   };
 }
 
+const IOS_DEV = variant('ios-dev');
+const IOS_PROD = variant('ios-prod');
+const ANDROID_DEV = variant('android-dev');
+const ANDROID_PROD = variant('android-prod');
+
 /**
- * One stored update entry whose environment-specific URLs are stamped with the
- * runtime gateway placeholder (as scripts/generate-update-manifest.mjs bakes
- * it), plus the env->host map the route resolves against. The ios/android
- * platform manifests carry distinct bundle URLs so a platform-selection
- * regression is observable. `overrides` lets a test drop the placeholder / map
- * or change the runtimeVersion to exercise the verbatim, unresolvable, and
- * no-update paths.
+ * One storeVersion-3 stored update: per-platform, per-environment pre-signed
+ * variants (distinct markers so platform + environment selection is
+ * observable). `overrides` lets a test drop a platform / variant or change the
+ * runtimeVersion to exercise the withhold and no-update paths.
  */
 function updateEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -62,26 +40,20 @@ function updateEntry(overrides: Record<string, unknown> = {}): Record<string, un
     createdAt: '2026-07-14T00:00:00.000Z',
     runtimeVersion: '1',
     otaAppVersion: '1.1.162-ac83861',
-    gatewayPlaceholder: PLACEHOLDER,
-    gatewayUrls: { development: DEV_GATEWAY, production: PROD_GATEWAY },
-    ios: platformManifest(IOS_BUNDLE),
-    android: platformManifest(ANDROID_BUNDLE),
+    ios: { development: IOS_DEV, production: IOS_PROD },
+    android: { development: ANDROID_DEV, production: ANDROID_PROD },
     ...overrides,
   };
 }
 
-/**
- * A storeVersion-2 update store: newest-first retained updates plus the
- * per-environment channel pointers, defaulting to a single update both
- * channels point at (the shape every fresh export writes).
- */
+/** A storeVersion-3 store: newest-first updates + per-environment pointers. */
 function storedManifest(
   entryOverrides: Record<string, unknown> = {},
   storeOverrides: Record<string, unknown> = {},
 ): string {
   const entry = updateEntry(entryOverrides);
   return JSON.stringify({
-    storeVersion: 2,
+    storeVersion: 3,
     channels: { development: entry.key, production: entry.key },
     updates: [entry],
     ...storeOverrides,
@@ -98,12 +70,23 @@ function manifestRequest(
   return new Request('https://gateway.test/api/v2/updates/manifest', { headers });
 }
 
-/** Pull the manifest JSON out of the expo multipart/mixed response body. */
-async function parseManifestBody(res: Response): Promise<Record<string, unknown>> {
-  const text = await res.text();
+/** Pull the raw manifest part bytes out of the expo multipart/mixed body. */
+function rawManifestPart(text: string): string {
   const afterHeaders = text.split('\r\n\r\n')[1] ?? '';
-  const json = afterHeaders.split('\r\n--expo-update-response--')[0];
-  return JSON.parse(json) as Record<string, unknown>;
+  return afterHeaders.split('\r\n--expo-update-response--')[0];
+}
+
+/**
+ * Extract the expo-signature header FROM THE MANIFEST PART, the way the
+ * expo-updates client does for multipart responses (it ignores the top-level
+ * HTTP header in the multipart branch).
+ */
+function partSignature(text: string): string | undefined {
+  const partHeaderBlock = text.split('\r\n\r\n')[0] ?? '';
+  const line = partHeaderBlock
+    .split('\r\n')
+    .find((l) => l.toLowerCase().startsWith('expo-signature:'));
+  return line?.slice(line.indexOf(':') + 1).trim();
 }
 
 const savedEnv = process.env.OTA_ENVIRONMENT;
@@ -117,50 +100,43 @@ afterEach(() => {
   else process.env.OTA_ENVIRONMENT = savedEnv;
 });
 
-describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
-  it('rewrites the placeholder to the production gateway when OTA_ENVIRONMENT=production', async () => {
+describe('GET /api/v2/updates/manifest -- pre-signed variant selection', () => {
+  it('serves the production variant body verbatim + its expo-signature when OTA_ENVIRONMENT=production', async () => {
     process.env.OTA_ENVIRONMENT = 'production';
     mockReadFileSync.mockReturnValueOnce(storedManifest());
 
     const res = await GET(manifestRequest());
     expect(res.status).toBe(200);
-
-    const manifest = (await parseManifestBody(res)) as {
-      launchAsset: { url: string };
-      assets: { url: string }[];
-      extra: { expoClient: { updates: { url: string }; extra: { gatewayUrl: string } } };
-    };
-    expect(manifest.launchAsset.url).toBe(`${PROD_GATEWAY}/api/v2/updates/static/${IOS_BUNDLE}`);
-    expect(manifest.assets[0].url).toBe(`${PROD_GATEWAY}/api/v2/updates/static/assets/img`);
-    expect(manifest.extra.expoClient.updates.url).toBe(`${PROD_GATEWAY}/api/v2/updates/manifest`);
-    expect(manifest.extra.expoClient.extra.gatewayUrl).toBe(PROD_GATEWAY);
-    // No placeholder must survive into the served manifest.
-    expect(JSON.stringify(manifest)).not.toContain(PLACEHOLDER);
+    const text = await res.text();
+    // Body is byte-for-byte the stored variant (no parse/re-stringify, so the
+    // signature still covers the served bytes).
+    expect(rawManifestPart(text)).toBe(IOS_PROD.body);
+    // The client reads the signature from the PART headers in the multipart
+    // branch; the HTTP-level header is set too for curl-ability.
+    expect(partSignature(text)).toBe(IOS_PROD.signature);
+    expect(res.headers.get('expo-signature')).toBe(IOS_PROD.signature);
+    expect(res.headers.get('content-type')).toContain('multipart/mixed');
   });
 
-  it('rewrites the placeholder to the dev gateway when OTA_ENVIRONMENT is unset', async () => {
+  it('serves the dev variant when OTA_ENVIRONMENT is unset', async () => {
     delete process.env.OTA_ENVIRONMENT;
     mockReadFileSync.mockReturnValueOnce(storedManifest());
 
-    const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
-      launchAsset: { url: string };
-      extra: { expoClient: { extra: { gatewayUrl: string } } };
-    };
-    expect(manifest.launchAsset.url).toBe(`${DEV_GATEWAY}/api/v2/updates/static/${IOS_BUNDLE}`);
-    expect(manifest.extra.expoClient.extra.gatewayUrl).toBe(DEV_GATEWAY);
+    const res = await GET(manifestRequest());
+    const text = await res.text();
+    expect(rawManifestPart(text)).toBe(IOS_DEV.body);
+    expect(partSignature(text)).toBe(IOS_DEV.signature);
   });
 
   it('treats any non-"production" OTA_ENVIRONMENT as dev (strict match)', async () => {
     process.env.OTA_ENVIRONMENT = 'PRODUCTION ';
     mockReadFileSync.mockReturnValueOnce(storedManifest());
 
-    const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
-      launchAsset: { url: string };
-    };
-    expect(manifest.launchAsset.url).toBe(`${DEV_GATEWAY}/api/v2/updates/static/${IOS_BUNDLE}`);
+    const res = await GET(manifestRequest());
+    expect(rawManifestPart(await res.text())).toBe(IOS_DEV.body);
   });
 
-  it('serves the android manifest (not ios) for expo-platform: android', async () => {
+  it('serves the android variant (not ios) for expo-platform: android', async () => {
     process.env.OTA_ENVIRONMENT = 'production';
     mockReadFileSync.mockReturnValueOnce(storedManifest());
 
@@ -171,102 +147,23 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
         'expo-protocol-version': '1',
       }),
     );
-    const manifest = (await parseManifestBody(res)) as { launchAsset: { url: string } };
-    // The android bundle differs from ios, so this also proves platform selection.
-    expect(manifest.launchAsset.url).toBe(`${PROD_GATEWAY}/api/v2/updates/static/${ANDROID_BUNDLE}`);
+    const text = await res.text();
+    expect(rawManifestPart(text)).toBe(ANDROID_PROD.body);
+    expect(partSignature(text)).toBe(ANDROID_PROD.signature);
   });
 
-  it('serves a per-environment update id (never the baked id, never shared across envs)', async () => {
-    // expo-updates treats update ids as globally unique: if dev and prod served
-    // the baked (bundle-content) id, a client that cached the update in one
-    // environment would relaunch the cached manifest -- stale gatewayUrl and
-    // all -- after switching to the other. The route must serve ids that are
-    // deterministic per environment and distinct between environments.
-    const bakedId = '00000000-0000-0000-0000-000000000000';
-
-    delete process.env.OTA_ENVIRONMENT;
-    mockReadFileSync.mockReturnValueOnce(storedManifest());
-    const devManifest = (await parseManifestBody(await GET(manifestRequest()))) as { id: string };
-
-    mockReadFileSync.mockReturnValueOnce(storedManifest());
-    const devManifestAgain = (await parseManifestBody(await GET(manifestRequest()))) as {
-      id: string;
-    };
-
-    process.env.OTA_ENVIRONMENT = 'production';
-    mockReadFileSync.mockReturnValueOnce(storedManifest());
-    const prodManifest = (await parseManifestBody(await GET(manifestRequest()))) as { id: string };
-
-    // Deterministic per environment (repeat requests serve the same id) ...
-    expect(devManifest.id).toBe(devManifestAgain.id);
-    // ... never the baked environment-neutral id ...
-    expect(devManifest.id).not.toBe(bakedId);
-    expect(prodManifest.id).not.toBe(bakedId);
-    // ... and never shared between environments.
-    expect(devManifest.id).not.toBe(prodManifest.id);
-    // Golden values pin the exact derivation (sha256 of "<bakedId>\n<base>",
-    // first 32 hex chars as 8-4-4-4-12). Ids must stay byte-stable across
-    // container restarts and redeploys of the same build -- an algorithm tweak
-    // that mints different ids on the next deploy would re-trigger the very
-    // cached-update churn this scheme prevents, while every relative assertion
-    // above stayed green. Recompute both values if the derivation is
-    // deliberately changed.
-    expect(devManifest.id).toBe('878f1c85-6655-3a77-b8d5-4bfcf08d8347');
-    expect(prodManifest.id).toBe('6682ec2c-2d25-87b2-fc0c-f3bd7b24495a');
-  });
-
-  it('serves the manifest verbatim when no placeholder was baked (concrete-host export)', async () => {
-    process.env.OTA_ENVIRONMENT = 'production';
-    // A manifest pinned to a concrete host omits gatewayPlaceholder/gatewayUrls.
-    mockReadFileSync.mockReturnValueOnce(
-      storedManifest({
-        gatewayPlaceholder: undefined,
-        gatewayUrls: undefined,
-        ios: {
-          id: '11111111-1111-1111-1111-111111111111',
-          runtimeVersion: '1',
-          launchAsset: { url: 'https://pinned.test/api/v2/updates/static/x', key: 'x', hash: 'h', contentType: 'application/javascript' },
-          assets: [],
-          metadata: {},
-          extra: {},
-        },
-      }),
-    );
-
-    const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
-      id: string;
-      launchAsset: { url: string };
-    };
-    expect(manifest.launchAsset.url).toBe('https://pinned.test/api/v2/updates/static/x');
-    // A pinned export is already environment-specific: its baked id is served
-    // as-is (no per-environment re-derivation).
-    expect(manifest.id).toBe('11111111-1111-1111-1111-111111111111');
-  });
-
-  it('withholds the update (204) and logs when the placeholder cannot be resolved', async () => {
+  it('withholds (204) and logs when no variant is materialized for the running environment', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.OTA_ENVIRONMENT = 'production';
-    // Placeholder present but no gateway hosts configured -> unresolvable.
-    mockReadFileSync.mockReturnValueOnce(storedManifest({ gatewayUrls: {} }));
-
-    const res = await GET(manifestRequest());
-    expect(res.status).toBe(204);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('no gateway URL resolves'));
-    errorSpy.mockRestore();
-  });
-
-  it('does NOT fall back to dev when a production container is missing its production host', async () => {
-    // Regression guard for the silent prod->dev fallback: a production container
-    // whose manifest lacks a production gateway must withhold, never serve dev.
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    process.env.OTA_ENVIRONMENT = 'production';
+    // A production container whose update lacks its production variant must
+    // withhold rather than serve the dev variant (wrong host + unsigned-for-env).
     mockReadFileSync.mockReturnValueOnce(
-      storedManifest({ gatewayUrls: { development: DEV_GATEWAY } }),
+      storedManifest({ ios: { development: IOS_DEV } }),
     );
 
     const res = await GET(manifestRequest());
     expect(res.status).toBe(204);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('no gateway URL resolves'));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('No stored variant'));
     errorSpy.mockRestore();
   });
 
@@ -336,14 +233,14 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
       expect(res.status).toBe(204);
     });
 
-    it('returns 204 when the manifest has no entry for the platform', async () => {
+    it('returns 204 when the update has no variants for the platform', async () => {
       mockReadFileSync.mockReturnValueOnce(storedManifest({ ios: undefined }));
       const res = await GET(manifestRequest());
       expect(res.status).toBe(204);
     });
   });
 
-  describe('store v2 selection (channels, pin, retention)', () => {
+  describe('store v3 selection (channels, pin, retention)', () => {
     const savedPin = process.env.OTA_UPDATE_PIN;
 
     afterEach(() => {
@@ -351,32 +248,29 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
       else process.env.OTA_UPDATE_PIN = savedPin;
     });
 
+    const OLD_IOS_DEV = variant('ios-dev-old');
+
     function twoUpdateStore(channels: Record<string, string>): string {
-      // Newest first, distinct bundles so the served entry is observable.
+      // Newest first, distinct variants so the served entry is observable.
       const newer = updateEntry({ key: 'v2-key' });
       const older = updateEntry({
         key: 'v1-key',
         createdAt: '2026-07-01T00:00:00.000Z',
-        ios: platformManifest('_expo/static/js/ios/entry-old.hbc'),
+        ios: { development: OLD_IOS_DEV, production: variant('ios-prod-old') },
       });
-      return JSON.stringify({ storeVersion: 2, channels, updates: [newer, older] });
+      return JSON.stringify({ storeVersion: 3, channels, updates: [newer, older] });
     }
 
     it("serves the environment's channel pointer, not just the newest update", async () => {
-      // Production repointed at the RETAINED older update (a rollback) while
-      // development stays on the newest -- the core blue/green lever.
+      // Production repointed at the RETAINED older update (a rollback).
       process.env.OTA_ENVIRONMENT = 'production';
       delete process.env.OTA_UPDATE_PIN;
       mockReadFileSync.mockReturnValueOnce(
         twoUpdateStore({ development: 'v2-key', production: 'v1-key' }),
       );
 
-      const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
-        launchAsset: { url: string };
-      };
-      expect(manifest.launchAsset.url).toBe(
-        `${PROD_GATEWAY}/api/v2/updates/static/_expo/static/js/ios/entry-old.hbc`,
-      );
+      const res = await GET(manifestRequest());
+      expect(rawManifestPart(await res.text())).toBe(variant('ios-prod-old').body);
     });
 
     it('OTA_UPDATE_PIN overrides the channel pointer (per-instance rollback)', async () => {
@@ -386,12 +280,8 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
         twoUpdateStore({ development: 'v2-key', production: 'v2-key' }),
       );
 
-      const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
-        launchAsset: { url: string };
-      };
-      expect(manifest.launchAsset.url).toBe(
-        `${DEV_GATEWAY}/api/v2/updates/static/_expo/static/js/ios/entry-old.hbc`,
-      );
+      const res = await GET(manifestRequest());
+      expect(rawManifestPart(await res.text())).toBe(OLD_IOS_DEV.body);
     });
 
     it('falls back to the newest retained update, loudly, on a dangling pointer', async () => {
@@ -402,26 +292,20 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
         twoUpdateStore({ development: 'pruned-key', production: 'v2-key' }),
       );
 
-      const manifest = (await parseManifestBody(await GET(manifestRequest()))) as {
-        launchAsset: { url: string };
-      };
-      // Newest-first entry served, and the dangling pointer surfaced in logs.
-      expect(manifest.launchAsset.url).toBe(`${DEV_GATEWAY}/api/v2/updates/static/${IOS_BUNDLE}`);
+      const res = await GET(manifestRequest());
+      expect(rawManifestPart(await res.text())).toBe(IOS_DEV.body);
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('No retained update matches'));
       errorSpy.mockRestore();
     });
 
     it('freezes (204) on a pinned update with an incompatible runtimeVersion -- never falls forward', async () => {
-      // The pin exists for rollback/canary: a container pinned to a retained
-      // key whose runtime no longer matches the client must WITHHOLD, not
-      // silently serve the newest compatible update instead.
       delete process.env.OTA_ENVIRONMENT;
       process.env.OTA_UPDATE_PIN = 'v1-key';
       const newer = updateEntry({ key: 'v2-key' });
       const older = updateEntry({ key: 'v1-key', runtimeVersion: '2' });
       mockReadFileSync.mockReturnValueOnce(
         JSON.stringify({
-          storeVersion: 2,
+          storeVersion: 3,
           channels: { development: 'v2-key', production: 'v2-key' },
           updates: [newer, older],
         }),
@@ -431,10 +315,10 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
       expect(res.status).toBe(204);
     });
 
-    it('returns 500 and logs on an unsupported store version', async () => {
+    it('returns 500 and logs on an unsupported store version (e.g. a pre-signing v2 store)', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockReadFileSync.mockReturnValueOnce(
-        JSON.stringify({ runtimeVersion: '1', ios: platformManifest(IOS_BUNDLE) }),
+        JSON.stringify({ storeVersion: 2, channels: {}, updates: [updateEntry()] }),
       );
 
       const res = await GET(manifestRequest());
@@ -445,7 +329,7 @@ describe('GET /api/v2/updates/manifest -- runtime gateway resolution', () => {
 
     it('returns 204 when the store retains no updates', async () => {
       mockReadFileSync.mockReturnValueOnce(
-        JSON.stringify({ storeVersion: 2, channels: {}, updates: [] }),
+        JSON.stringify({ storeVersion: 3, channels: {}, updates: [] }),
       );
       const res = await GET(manifestRequest());
       expect(res.status).toBe(204);

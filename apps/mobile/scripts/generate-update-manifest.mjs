@@ -2,13 +2,20 @@
  * Generates an Expo Updates Protocol v1 manifest from a native expo export.
  *
  * Reads: dist/native-export/metadata.json (written by expo export)
- * Writes: dist/server/update-manifest.json -- a storeVersion-2 UPDATE STORE:
+ * Writes: dist/server/update-manifest.json -- a storeVersion-3 UPDATE STORE:
  *         the newest export plus up to OTA_RETAIN_UPDATES-1 retained previous
  *         updates, and per-environment channel pointers (repointed at the
- *         newest export). The manifest API route serves the pointed-at update;
- *         repointing (or OTA_UPDATE_PIN on a container) is rollback.
+ *         newest export). For each retained update x platform it MATERIALIZES
+ *         and SIGNS the final per-environment manifest variants (development +
+ *         production) -- the exact JSON bytes the manifest API route serves
+ *         verbatim, each with its RSA signature. The route does no request-time
+ *         stamping, id derivation, or signing.
  * Archives: retained updates + their static files under .ota-archive/ so they
- *         survive expo export wiping dist/ between deploys.
+ *         survive expo export wiping dist/ between deploys. The archived store
+ *         keeps the pre-materialization PLACEHOLDER form of each entry (see
+ *         buildPlatformManifest) so retained updates can be re-materialized and
+ *         re-signed on every export; materialized+signed variants live only in
+ *         the served store.
  * Copies: every RETAINED update's bundles/assets into dist/client/ so the
  *         server can still serve a rolled-back update's files.
  * Cleans: dist/native-export/ (temp dir)
@@ -43,6 +50,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, extname, join } from "node:path";
+
+import {
+  convertCertificatePEMToCertificate,
+  convertPrivateKeyPEMToPrivateKey,
+  signBufferRSASHA256AndVerify,
+} from "@expo/code-signing-certificates";
 
 const NATIVE_EXPORT_DIR = "dist/native-export";
 const CLIENT_DIR = join("dist", "client");
@@ -98,6 +111,56 @@ if (
   throw new Error(
     "[generate-update-manifest] Incomplete gateway hosts: app.json extra.gatewayUrls must define both development and production (or pin OTA_GATEWAY_URL)",
   );
+}
+
+// -- Code-signing keys (required; no unsigned mode) --
+// The signature covers the EXACT served manifest bytes, so signing happens
+// here (where the private key lives) rather than per request. The export fails
+// loudly, pointing at the setup script, when the key material is missing.
+const CERTS_DIR = "certs";
+const PRIVATE_KEY_PATH = join(CERTS_DIR, "private-key.pem");
+const CERTIFICATE_PATH = join(CERTS_DIR, "certificate.pem");
+let signingPrivateKey;
+let signingCertificate;
+try {
+  signingPrivateKey = convertPrivateKeyPEMToPrivateKey(
+    readFileSync(PRIVATE_KEY_PATH, "utf-8"),
+  );
+  signingCertificate = convertCertificatePEMToCertificate(
+    readFileSync(CERTIFICATE_PATH, "utf-8"),
+  );
+} catch (err) {
+  if (err && err.code === "ENOENT") {
+    throw new Error(
+      "[generate-update-manifest] Missing OTA code-signing keys "
+        + `(${PRIVATE_KEY_PATH}, ${CERTIFICATE_PATH}). Run `
+        + "`node scripts/generate-code-signing-keys.mjs` first (once per clone). "
+        + "There is no unsigned mode -- see docs/ota-updates.md#code-signing.",
+    );
+  }
+  throw err;
+}
+
+/**
+ * The keyid baked into the hosts (app.json updates.codeSigningMetadata) and
+ * echoed in the expo-signature response header. The alg defaults to
+ * rsa-v1_5-sha256 on the client when omitted from the header.
+ */
+const SIGNING_KEYID = "main";
+
+/**
+ * Sign a manifest variant's exact bytes and pair them with the structured-field
+ * expo-signature header value the route serves untouched. The body string MUST
+ * be stored and served byte-for-byte: any re-serialization would change the
+ * signed bytes and fail client verification.
+ */
+function signVariant(body) {
+  const signature = signBufferRSASHA256AndVerify(
+    signingPrivateKey,
+    signingCertificate,
+    Buffer.from(body, "utf-8"),
+  );
+  return { body, signature: `sig="${signature}", keyid="${SIGNING_KEYID}"` };
 }
 
 function readGitSha() {
@@ -181,12 +244,10 @@ function sha256Base64Url(filePath) {
 /**
  * Derive a deterministic UUID from a base64url SHA-256 hash.
  * Same bundle content always produces the same ID, preventing unnecessary
- * re-downloads. This baked id is environment-NEUTRAL: in the runtime-gateway
- * scheme the manifest API route re-derives a per-environment id from it at
- * request time (see deriveEnvironmentUpdateId in
- * src/app/api/v2/updates/manifest+api.ts) -- expo-updates treats ids as
- * globally unique, so dev and prod must never serve the same id with
- * different URLs.
+ * re-downloads. This baked id is environment-NEUTRAL: at materialization time
+ * (below) each per-environment variant derives its OWN served id from this one
+ * via deriveEnvironmentUpdateId -- expo-updates treats ids as globally unique,
+ * so dev and prod must never serve the same id with different URLs.
  */
 function hashToUUID(base64urlHash) {
   const hex = Buffer.from(base64urlHash, "base64url").toString("hex").slice(0, 32);
@@ -197,6 +258,93 @@ function hashToUUID(base64urlHash) {
     hex.slice(16, 20),
     hex.slice(20, 32),
   ].join("-");
+}
+
+/**
+ * Derive the environment-specific update id served to clients.
+ *
+ * The baked id identifies bundle content, so both environments would otherwise
+ * carry the SAME id with DIFFERENT gateway URLs -- but expo-updates treats
+ * update ids as globally unique. A client that cached this update while pointed
+ * at one gateway and then receives the same id from the other logs "this is a
+ * server error", rewrites the stored update's scope key, and relaunches the
+ * CACHED manifest -- so the embedded gateway URL never follows a host
+ * environment switch. Hashing the baked id with the resolved gateway base keeps
+ * the served id deterministic per (build, environment) while guaranteeing the
+ * two environments never share one. Assets still dedupe client-side by content
+ * hash, so re-pointing an environment only inserts a new update row -- it does
+ * not re-download the bundle.
+ *
+ * The formula (SHA-256 of "<bakedId>\n<base>", first 128 bits as a UUID) is
+ * unchanged from the request-time era; only its location moved (from the route
+ * into this generator) so the id becomes part of the signed bytes.
+ */
+function deriveEnvironmentUpdateId(bakedId, base) {
+  const hex = createHash("sha256").update(`${bakedId}\n${base}`).digest("hex").slice(0, 32);
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join("-");
+}
+
+// Platform manifests live under these keys on a stored update entry.
+const PLATFORM_KEYS = ["ios", "android"];
+
+/**
+ * Materialize one platform manifest's per-environment variants from the
+ * archived PLACEHOLDER form, ready to serve verbatim:
+ *  - placeholder exports: replace the placeholder with each environment's host
+ *    and derive that environment's served id, then sign -- producing distinct
+ *    development + production variants.
+ *  - concrete OTA_GATEWAY_URL exports: the manifest is already environment-
+ *    specific, so a SINGLE variant (id served as-is) is stored under both
+ *    environment keys and the route serves it regardless of OTA_ENVIRONMENT.
+ */
+function materializePlatformVariants(manifest, gatewayPlaceholder, envGatewayUrls) {
+  if (gatewayPlaceholder && envGatewayUrls) {
+    const variants = {};
+    for (const env of ["development", "production"]) {
+      const base = envGatewayUrls[env];
+      const resolved = JSON.parse(
+        JSON.stringify(manifest).replaceAll(gatewayPlaceholder, () => base),
+      );
+      resolved.id = deriveEnvironmentUpdateId(manifest.id, base);
+      variants[env] = signVariant(JSON.stringify(resolved));
+    }
+    return variants;
+  }
+  const variant = signVariant(JSON.stringify(manifest));
+  return { development: variant, production: variant };
+}
+
+/**
+ * Turn an archived (placeholder-form) update entry into the served form: the
+ * store metadata plus, per platform, the materialized+signed environment
+ * variants. Retained updates are re-materialized and re-signed on every export
+ * (the key is present at export time), so a rollback target's variants stay
+ * correctly signed even though its bundle was built by an earlier export.
+ */
+function materializeUpdate(update) {
+  const served = {
+    key: update.key,
+    createdAt: update.createdAt,
+    runtimeVersion: update.runtimeVersion,
+    otaAppVersion: update.otaAppVersion,
+    files: update.files,
+  };
+  for (const platform of PLATFORM_KEYS) {
+    if (update[platform]) {
+      served[platform] = materializePlatformVariants(
+        update[platform],
+        update.gatewayPlaceholder,
+        update.gatewayUrls,
+      );
+    }
+  }
+  return served;
 }
 
 const EXT_TO_CONTENT_TYPE = {
@@ -423,10 +571,15 @@ for (const update of updates) {
 // Channel pointers both advance to the new export by default. Serving-time
 // divergence (canary/rollback) is per-instance: set OTA_UPDATE_PIN on a
 // container to a retained key, or hand-edit the pointers before deploy.
+//
+// The served store carries storeVersion 3: each retained update is materialized
+// into per-platform, per-environment { body, signature } variants (the exact
+// bytes the route serves verbatim). The ARCHIVE keeps the placeholder form
+// (below) so retained updates can be re-materialized and re-signed next export.
 const store = {
-  storeVersion: 2,
+  storeVersion: 3,
   channels: { development: entry.key, production: entry.key },
-  updates,
+  updates: updates.map(materializeUpdate),
 };
 
 mkdirSync(SERVER_DIR, { recursive: true });

@@ -1,23 +1,22 @@
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-interface Asset {
-  url: string;
-  contentType: string;
-  key: string;
-  hash: string;
-  fileExtension?: string;
+/**
+ * A pre-materialized, pre-signed manifest variant: the exact JSON bytes served
+ * as the multipart manifest part and the structured-field value for the
+ * expo-signature response header that authenticates them. Produced at export
+ * time by scripts/generate-update-manifest.mjs (the signature covers `body`
+ * byte-for-byte). This route serves both untouched.
+ */
+interface ManifestVariant {
+  body: string;
+  signature: string;
 }
 
-interface UpdateManifest {
-  id: string;
-  createdAt: string;
-  runtimeVersion: string;
-  launchAsset: Asset;
-  assets: Asset[];
-  metadata: Record<string, string>;
-  extra: Record<string, unknown>;
+/** Per-environment variants of one platform's manifest. */
+interface PlatformVariants {
+  development?: ManifestVariant;
+  production?: ManifestVariant;
 }
 
 interface StoredUpdate {
@@ -27,32 +26,28 @@ interface StoredUpdate {
   createdAt: string;
   runtimeVersion: string;
   // Platform-independent build identifier. This route ignores it and serves
-  // the per-platform manifests below.
+  // the per-platform variants below.
   otaAppVersion?: string;
-  // Present when the update was built for the placeholder / runtime-gateway
-  // scheme (scripts/generate-update-manifest.mjs): every environment-specific
-  // URL in the platform manifests is stamped with `gatewayPlaceholder`, and
-  // `gatewayUrls` maps the deploy environment to its real gateway host. This
-  // route swaps the placeholder for the running environment's host
-  // (OTA_ENVIRONMENT) on each request, so one export serves both environments.
-  // Absent for exports pinned to a concrete OTA_GATEWAY_URL, which are
-  // already environment-specific and served verbatim.
-  gatewayPlaceholder?: string;
-  gatewayUrls?: { development?: string; production?: string };
   // Relative static paths this update's launch asset + assets occupy; used by
   // the export script's retention GC, ignored here.
   files?: string[];
-  ios?: UpdateManifest;
-  android?: UpdateManifest;
+  // Per-platform, per-environment pre-signed variants. A placeholder export
+  // has distinct development/production variants (different gateway host and
+  // update id); a concrete-host export stores the same single variant under
+  // both keys.
+  ios?: PlatformVariants;
+  android?: PlatformVariants;
 }
 
 /**
  * The versioned update store (dist/server/update-manifest.json, storeVersion
- * 2). The export script RETAINS recent updates and repoints the per-environment
- * channel pointers at the newest one; this route resolves the pointer for its
- * OTA_ENVIRONMENT (or the OTA_UPDATE_PIN override) and serves that update.
- * Retention + pointers are what make rollback an ops action: repoint (or pin a
- * container) to a retained key -- no rebuild, no redeploy of the JS.
+ * 3). The export script RETAINS recent updates, materializes+signs each
+ * update's per-environment variants, and repoints the per-environment channel
+ * pointers at the newest one; this route resolves the pointer for its
+ * OTA_ENVIRONMENT (or the OTA_UPDATE_PIN override), picks the matching
+ * environment variant, and serves its stored bytes verbatim. Retention +
+ * pointers are what make rollback an ops action: repoint (or pin a container)
+ * to a retained key -- no rebuild, no redeploy of the JS.
  */
 interface UpdateStore {
   storeVersion: number;
@@ -75,71 +70,24 @@ function noUpdate(): Response {
 }
 
 /**
- * Resolve the gateway host this instance should advertise in the manifest.
- * Mirrors the strict `=== 'production'` deploy-environment check used across the
- * server: any value other than 'production' -- unset, 'development', a typo --
- * resolves to the dev gateway. Returns undefined when no host is configured for
- * the resolved environment.
+ * Serve a pre-signed variant verbatim: the stored body becomes the multipart
+ * manifest part byte-for-byte, and the stored signature is emitted as an
+ * `expo-signature` header ON THE MANIFEST PART -- for multipart responses the
+ * expo-updates client reads the signature from the part headers, not the
+ * top-level HTTP headers (it only consults the HTTP header for non-multipart
+ * responses). The HTTP-level header is also set, harmlessly, for curl-ability.
+ * The body MUST NOT be parsed and re-serialized -- the signature covers those
+ * exact bytes, and any change fails client verification.
  */
-function resolveGatewayBase(
-  gatewayUrls: NonNullable<StoredUpdate['gatewayUrls']>,
-): string | undefined {
-  const key = process.env.OTA_ENVIRONMENT === 'production' ? 'production' : 'development';
-  // No cross-environment fallback: a production instance missing its production
-  // host must NOT silently advertise the dev gateway (that is the exact
-  // wrong-environment failure this route exists to prevent). Returning undefined
-  // routes to the withhold path below instead.
-  return gatewayUrls[key];
-}
-
-/**
- * Derive the environment-specific update id served to clients.
- *
- * The baked id identifies the bundle content, so both environments bake the
- * SAME id -- but expo-updates treats update ids as globally unique. A client
- * that cached this update while pointed at one gateway and then receives the
- * same id from the other logs "this is a server error", rewrites the stored
- * update's scope key, and relaunches the CACHED update -- so the manifest it
- * exposes to JS (Constants.expoConfig, including extra.gatewayUrl) never
- * follows an environment switch. Hashing the baked id with the resolved
- * gateway base URL keeps the served id deterministic per (build, environment)
- * while guaranteeing the two environments never share one. Assets are still
- * deduplicated client-side by content hash, so re-pointing an environment
- * only inserts a new update row -- it does not re-download the bundle.
- */
-function deriveEnvironmentUpdateId(bakedId: string, base: string): string {
-  const hex = createHash('sha256').update(`${bakedId}\n${base}`).digest('hex').slice(0, 32);
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20, 32),
-  ].join('-');
-}
-
-/** Replace every occurrence of the baked placeholder with the resolved host. */
-function applyGatewayBase(
-  manifest: UpdateManifest,
-  placeholder: string,
-  base: string,
-): UpdateManifest {
-  // Pass a replacer function so `base` is inserted literally -- a string
-  // replacement would interpret `$&`, `$$`, etc. in the host.
-  return JSON.parse(
-    JSON.stringify(manifest).replaceAll(placeholder, () => base),
-  ) as UpdateManifest;
-}
-
-function buildMultipartResponse(manifest: UpdateManifest): Response {
+function buildMultipartResponse(variant: ManifestVariant): Response {
   const boundary = 'expo-update-response';
-  const manifestJson = JSON.stringify(manifest);
   const body = [
     `--${boundary}`,
     'Content-Type: application/json',
     'Content-Disposition: form-data; name="manifest"',
+    `expo-signature: ${variant.signature}`,
     '',
-    manifestJson,
+    variant.body,
     `--${boundary}--`,
     '',
   ].join('\r\n');
@@ -151,6 +99,7 @@ function buildMultipartResponse(manifest: UpdateManifest): Response {
       'expo-sfv-version': '0',
       'expo-manifest-filters': '',
       'expo-server-defined-headers': '',
+      'expo-signature': variant.signature,
       'cache-control': 'private, max-age=0',
       'content-type': `multipart/mixed; boundary=${boundary}`,
     },
@@ -189,9 +138,9 @@ export async function GET(request: Request): Promise<Response> {
 
   // The store format is versioned and the serving image is rebuilt with every
   // export, so an unknown version is a deploy bug, not a migration case.
-  if (store.storeVersion !== 2) {
+  if (store.storeVersion !== 3) {
     console.error(
-      `[updates/manifest] Unsupported store version ${JSON.stringify(store.storeVersion)}; expected 2.`,
+      `[updates/manifest] Unsupported store version ${JSON.stringify(store.storeVersion)}; expected 3.`,
     );
     return new Response('Internal Server Error', { status: 500 });
   }
@@ -202,7 +151,7 @@ export async function GET(request: Request): Promise<Response> {
   // Select the update: an explicit per-instance pin wins (the blue/green /
   // rollback lever -- point one container at a retained key), then this
   // environment's channel pointer. Same strict-'production' polarity as the
-  // gateway resolution below. Unknown keys fall back to the newest retained
+  // variant selection below. Unknown keys fall back to the newest retained
   // update, loudly: serving SOMETHING compatible beats a silent outage, but
   // a dangling pointer is an ops mistake worth surfacing.
   const channel = process.env.OTA_ENVIRONMENT === 'production' ? 'production' : 'development';
@@ -221,35 +170,28 @@ export async function GET(request: Request): Promise<Response> {
     return noUpdate();
   }
 
-  const manifest = platform === 'ios' ? stored.ios : stored.android;
-  if (!manifest) {
+  const variants = platform === 'ios' ? stored.ios : stored.android;
+  if (!variants) {
     return noUpdate();
   }
 
-  // The manifest is baked once with a gateway placeholder so a single export can
-  // serve either environment; swap it for this instance's gateway before
-  // responding. When no placeholder was baked (a concrete OTA_GATEWAY_URL
-  // export) the manifest is already environment-specific and served as-is.
-  const { gatewayPlaceholder, gatewayUrls } = stored;
-  if (gatewayPlaceholder && gatewayUrls) {
-    const base = resolveGatewayBase(gatewayUrls);
-    if (!base) {
-      // The manifest expects a runtime host but none is configured for this
-      // environment. Serving the raw placeholder would point the app at a bogus
-      // host, so withhold the update (fail visibly in the logs, keep the app on
-      // its current bundle) rather than hand out a broken one.
-      console.error(
-        '[updates/manifest] Manifest has a gateway placeholder but no gateway URL resolves for '
-          + `OTA_ENVIRONMENT=${JSON.stringify(process.env.OTA_ENVIRONMENT)}; withholding the update.`,
-      );
-      return noUpdate();
-    }
-    const resolved = applyGatewayBase(manifest, gatewayPlaceholder, base);
-    // The environments must not serve the same update id with different URLs
-    // (see deriveEnvironmentUpdateId); stamp the per-environment id.
-    resolved.id = deriveEnvironmentUpdateId(manifest.id, base);
-    return buildMultipartResponse(resolved);
+  // Pick this instance's pre-signed environment variant. Same strict
+  // '=== production' polarity used across the server: anything other than
+  // 'production' (unset, 'development', a typo) resolves to the dev variant.
+  const variant = variants[channel];
+  if (!variant) {
+    // No variant materialized for the running environment. The export fails
+    // before shipping a store that lacks a required variant, so this is a
+    // deploy anomaly: withhold the update (keep the app on its current bundle)
+    // rather than hand out an unsigned or wrong-host body -- the same withhold
+    // polarity as the pre-signing era's missing-gateway case.
+    console.error(
+      `[updates/manifest] No stored variant for OTA_ENVIRONMENT=${JSON.stringify(
+        process.env.OTA_ENVIRONMENT,
+      )} (channel "${channel}") on update ${JSON.stringify(stored.key)}; withholding the update.`,
+    );
+    return noUpdate();
   }
 
-  return buildMultipartResponse(manifest);
+  return buildMultipartResponse(variant);
 }

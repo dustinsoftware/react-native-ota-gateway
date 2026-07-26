@@ -1,8 +1,26 @@
 import { execSync, spawn } from "node:child_process";
-import { cpSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const COMPLETION_MARKER = "Exported: dist";
+
+// The export signs every manifest variant with the OTA code-signing private
+// key (scripts/generate-update-manifest.mjs). Fail loudly BEFORE the long
+// `expo export` when the key material is missing, pointing at the setup script
+// -- there is no unsigned mode. See docs/ota-updates.md#code-signing.
+const CODE_SIGNING_KEYS = [
+  join("certs", "private-key.pem"),
+  join("certs", "certificate.pem"),
+];
+const missingKeys = CODE_SIGNING_KEYS.filter((p) => !existsSync(p));
+if (missingKeys.length > 0) {
+  console.error(
+    `[export-web] Missing OTA code-signing keys: ${missingKeys.join(", ")}.\n`
+      + "  Run `node scripts/generate-code-signing-keys.mjs` first (once per clone).\n"
+      + "  There is no unsigned mode -- see docs/ota-updates.md#code-signing.",
+  );
+  process.exit(1);
+}
 
 function copyHtmlToClient() {
   const serverDir = join("dist", "server");

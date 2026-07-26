@@ -144,12 +144,15 @@ JS layer before RN boots.
   `OtaUpdatesEnvironment` enum and an `initializeUpdates(environment:)` entry
   point into the CLI-generated stub. It reads the per-environment URL from
   `Expo.plist` and applies it via `AppController.overrideConfiguration` **before**
-  the updates controller is created, then starts the controller. Because the
-  override replaces the config the controller reads, it must carry the
-  code-signing keys (`EXUpdatesCodeSigningCertificate` /
-  `EXUpdatesCodeSigningMetadata`) forward from `Expo.plist` alongside the URL --
-  dropping them there would disable signature verification even though the plist
-  defines them. It also:
+  the updates controller is created, then starts the controller.
+  `overrideConfiguration` **merges** the override dictionary onto the full
+  `Expo.plist` config (expo-updates' `configWithExpoPlist(mergingOtherDictionary:)`),
+  so the code-signing keys (`EXUpdatesCodeSigningCertificate` /
+  `EXUpdatesCodeSigningMetadata`) baked into the plist survive automatically.
+  The entry point nonetheless **copies them forward explicitly** into the
+  override dictionary alongside the URL, as defense-in-depth: if the merge
+  semantics ever change, signature verification must not silently switch off.
+  It also:
   - publishes the host's selection to the JS layer via
     `HostEnvironmentRegistry` (`modules/host-environment`), so
     `src/api/gateway-url.ts` resolves the gateway from the live host selection
@@ -175,17 +178,18 @@ JS layer before RN boots.
   the template's environment-less `initialize` to a private `bootReactNative`
   helper**, and injects the environment-**required**
   `initialize(application, environment, onJSBundleLoaded)` entry point. That
-  entry point applies a full expo-updates config
+  entry point applies the expo-updates config
   (`enabled`, `updateUrl`, `runtimeVersion`, `checkOnLaunch`, `launchWaitMs`,
-  `hasEmbeddedUpdate`, plus the code-signing certificate + metadata) via
-  `UpdatesController.overrideConfiguration` before the
+  `hasEmbeddedUpdate`) via `UpdatesController.overrideConfiguration` before the
   RN host boots, and publishes the selection to the JS layer via
   `HostEnvironment` (`modules/host-environment`). The code-signing meta-data
   (`expo.modules.updates.CODE_SIGNING_CERTIFICATE` / `...CODE_SIGNING_METADATA`)
-  is baked into the library manifest at prebuild and must survive the AAR ->
-  host manifest merge; the override must carry it forward too, or the controller
-  starts without a verify cert (see
-  [ota-updates.md](./ota-updates.md#code-signing)).
+  is baked into the library manifest at prebuild and rides the AAR -> host
+  manifest merge. The override deliberately **omits** the code-signing keys:
+  when a key is absent from the override map, expo-updates'
+  `UpdatesConfiguration` falls back per-key to the host manifest meta-data, so
+  the baked certificate keeps verifying manifests without the override having to
+  re-supply it (see [ota-updates.md](./ota-updates.md#code-signing)).
 
 The environment parameter is **required** on both platforms -- there is no
 environment-less entry point. On iOS an environment-less path was a

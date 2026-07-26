@@ -10,6 +10,10 @@ dist/
 # Retained OTA updates + their static files (generate-update-manifest.mjs)
 apps/mobile/.ota-archive/
 
+# OTA manifest code-signing keys (generate-code-signing-keys.mjs). This is a
+# public template with no shared key -- every clone generates its own pair.
+apps/mobile/certs/
+
 # generated native folders
 # apps/mobile/ios and apps/mobile/android are regenerated from Expo config
 # (app.json + app.config.ts + plugins/) via `pnpm --filter @ota-gateway/mobile
