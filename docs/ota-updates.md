@@ -288,8 +288,9 @@ attempt", not "last confirmed update"):
 2. **Gate iff stale.** `OtaGate` blocks rendering (showing the "Updating" screen)
    and runs an attempt **iff the last attempt timestamp is missing or >24h old**.
    There is no `isEmbeddedLaunch` special case. A first-ever launch has no
-   timestamp -> stale -> gates once; that is the only time a user normally sees
-   "Updating".
+   timestamp -> stale -> gates once; after that a user sees "Updating" at most
+   once per 24h window (the next launch or surface mount after the window
+   elapses), never on remounts in between.
 3. **Once per JS runtime.** `OtaGate` memoizes its resolution in a module-scoped
    flag: once the gate resolves `ready`, later surface mounts in the same runtime
    render children immediately and synchronously -- no async timestamp read, no
@@ -306,13 +307,21 @@ diagnostics screen (read from `Updates.manifest.extra.otaAppVersion`).
 ## `useEmbeddedUpdate: false` (must stay false)
 
 `app.json`'s `updates` block sets `useEmbeddedUpdate: false`. Keep it false.
-Setting it `true` makes `Updates.isEmbeddedLaunch` report **true on every
-launch** and makes expo-updates **ignore already-downloaded updates at boot**,
-launching the embedded bundle instead of the cached OTA. `OtaGate` no longer
-branches on `isEmbeddedLaunch`, so this no longer misroutes the gate -- but
-keeping the flag false is still load-bearing: expo-updates must actually launch
-the cached OTA bundle, and `Updates.isEmbeddedLaunch` must stay a correct
-diagnostic (it is surfaced on the Developer screen).
+The flag's actual mechanism (verified in expo-updates'
+`AppLauncherWithDatabase`): when false, the **embedded update is excluded from
+the launcher's launchable candidates**, so expo-updates only ever selects a
+downloaded OTA; when true (the expo default), the embedded update competes in
+launch selection alongside cached OTAs. The historical reason for pinning it
+false -- the old `OtaGate` branched on `Updates.isEmbeddedLaunch` -- is gone
+(the gate no longer consults it), but keep it false anyway: this is the
+on-device-proven configuration, the brownfield release path has its own
+embedded-bundle fallback (the `bundleURLOverride` seam, see
+[brownfield.md](./brownfield.md)) so excluding the embedded update from the
+launcher costs nothing, and flipping it changes which bundle the launcher
+selects around first install / post-install states -- re-verify the whole OTA
+matrix before ever changing it. `Updates.isEmbeddedLaunch` remains surfaced on
+the Developer screen as a diagnostic; its observed values also shift if the
+flag flips.
 
 ## Reload: bridge-based in brownfield, `reloadAsync` standalone
 
