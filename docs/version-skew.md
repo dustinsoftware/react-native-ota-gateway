@@ -57,9 +57,10 @@ signing those with the **old** key until their population has drained.
 
 ### Fail-open update gating
 
-`OtaGate` (`src/components/ota-gate.tsx`) blocks first render only on an
-embedded launch or when the last confirmed update is >24h old, and **falls
-through to the current bundle on any check failure** (offline, server error).
+`OtaGate` (`src/components/ota-gate.tsx`) blocks first render only when the last
+OTA attempt is missing or >24h old (once per 24h, once per JS runtime), and
+**falls through to the current bundle on any check failure** (offline, server
+error).
 A skew-handling design must preserve this polarity: the only screen that may
 ever hard-block is the deliberate update-required gate of Part 2, never an
 accidental one.

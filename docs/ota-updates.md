@@ -22,7 +22,7 @@ static prefix `/api/v2/updates/static`, base-URL placeholder
 | Manifest generator | `scripts/generate-update-manifest.mjs` | Turns the native export's `metadata.json` into the storeVersion-3 update store (`dist/server/update-manifest.json`): for each retained update it **materializes and signs the final per-environment manifest variants** (development + production) with the private key. The new update plus retained previous updates (`.ota-archive/`, default 3, `OTA_RETAIN_UPDATES`) and per-environment channel pointers repointed at the new export; copies every retained update's bundle + assets into `dist/client/`. |
 | Manifest route | `src/app/api/v2/updates/manifest+api.ts` | `expo-router` `+api.ts` route that selects this instance's pre-signed environment variant and serves its exact stored bytes verbatim, adding the `expo-signature` header. No request-time stamping or id derivation. |
 | Static mount | `server/index.ts` | `express.static` on `/api/v2/updates/static` (1-year `immutable`; safe via `?h=` busters). |
-| Launch gate | `src/components/ota-gate.tsx` + `src/utils/attempt-ota-update.ts` | Blocks first render while an update is fetched, per the embedded/stale/fresh policy. |
+| Launch gate | `src/components/ota-gate.tsx` + `src/utils/attempt-ota-update.ts` | Blocks first render while an update is fetched, iff the last OTA attempt is missing or >24h old -- once per 24h, once per JS runtime. |
 | Reload | `src/utils/reload-app.ts` | Bridge reload under a brownfield host; `Updates.reloadAsync()` standalone. |
 
 ## The manifest route
@@ -275,15 +275,29 @@ disable the buster.)
 ## Launch gating: `OtaGate`
 
 `OtaGate` wraps the route stack (in `_layout.tsx`) and runs identically in
-standalone and brownfield modes. Its policy, based on how long since the last
-applied update (a 24h window tracked in `ota-timestamp.ts`):
+standalone and brownfield modes. Its policy is **unconditional staleness** of
+the last OTA *attempt* -- a 24h window tracked in `ota-timestamp.ts` under the
+SecureStore key `ota_gateway_last_updated` (its meaning is now "last OTA
+attempt", not "last confirmed update"):
 
-1. **Embedded launch** (first install, no cached OTA yet): block rendering,
-   download the latest bundle, reload.
-2. **Stale launch** (last update > 24h ago): block rendering, check for an
-   update, apply if available.
-3. **Fresh launch** (last update < 24h ago): render immediately; the native
-   `checkAutomatically` policy handles background updates.
+1. **Attempt-based throttle.** `attempt-ota-update.ts` saves the timestamp once
+   per real attempt **regardless of outcome** -- success (`reloading`),
+   `no-update`, or `error`. (The `__DEV__` / Updates-disabled early return saves
+   nothing.) A failed attempt therefore also starts the 24h window, so the gate
+   will not retry until the window elapses.
+2. **Gate iff stale.** `OtaGate` blocks rendering (showing the "Updating" screen)
+   and runs an attempt **iff the last attempt timestamp is missing or >24h old**.
+   There is no `isEmbeddedLaunch` special case. A first-ever launch has no
+   timestamp -> stale -> gates once; that is the only time a user normally sees
+   "Updating".
+3. **Once per JS runtime.** `OtaGate` memoizes its resolution in a module-scoped
+   flag: once the gate resolves `ready`, later surface mounts in the same runtime
+   render children immediately and synchronously -- no async timestamp read, no
+   blank frame, no "Updating" flash. This matters in **brownfield hosts, where
+   every native tab switch tears down and remounts the RN surface** (all mounts
+   share one JS runtime); without the memo each remount would re-run the check
+   and flash "Updating". An OTA reload restarts the runtime (resetting the memo),
+   but the freshly saved timestamp keeps that remount gate-free.
 
 `attempt-ota-update.ts` performs the check/fetch and then calls the reload
 helper. `ota-app-version.ts` exposes the human-readable build identifier for the
@@ -292,10 +306,13 @@ diagnostics screen (read from `Updates.manifest.extra.otaAppVersion`).
 ## `useEmbeddedUpdate: false` (must stay false)
 
 `app.json`'s `updates` block sets `useEmbeddedUpdate: false`. Keep it false.
-Setting it `true` makes `Updates.isEmbeddedLaunch` true on every launch, so
-`OtaGate` treats every launch as an embedded launch and auto-reloads -- which,
-in a brownfield host, fires the crashing reload path (see below) before the
-host-message reload can help.
+Setting it `true` makes `Updates.isEmbeddedLaunch` report **true on every
+launch** and makes expo-updates **ignore already-downloaded updates at boot**,
+launching the embedded bundle instead of the cached OTA. `OtaGate` no longer
+branches on `isEmbeddedLaunch`, so this no longer misroutes the gate -- but
+keeping the flag false is still load-bearing: expo-updates must actually launch
+the cached OTA bundle, and `Updates.isEmbeddedLaunch` must stay a correct
+diagnostic (it is surfaced on the Developer screen).
 
 ## Reload: bridge-based in brownfield, `reloadAsync` standalone
 
