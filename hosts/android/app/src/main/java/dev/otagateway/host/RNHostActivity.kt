@@ -19,7 +19,7 @@ import com.callstack.reactnativebrownfield.ReactNativeFragment
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
 /**
- * Launcher and host shell. Mirrors the eng-regal-hybrid-app lifecycle: one
+ * Launcher and host shell. Mirrors the host lifecycle: one
  * shared, already-initialized brownfield runtime (booted in
  * [OtaHostApplication]) with at most ONE mounted [ReactNativeFragment] at a
  * time. The shell is a toolbar, a single content container, and a
