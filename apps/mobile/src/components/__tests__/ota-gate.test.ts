@@ -110,7 +110,18 @@ describe('attemptOtaUpdate', () => {
     });
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockReload).not.toHaveBeenCalled();
-    expect(mockSetItem).not.toHaveBeenCalled();
+    // Timestamp is saved at attempt start, before the failing check.
+    expect(mockSetItem).toHaveBeenCalledOnce();
+  });
+
+  it('saves timestamp at attempt start even when the check throws', async () => {
+    mockCheck.mockRejectedValue(new Error('Network unavailable'));
+
+    const result = await attemptOtaUpdate();
+
+    expect(result.outcome).toBe('error');
+    expect(mockSetItem).toHaveBeenCalledOnce();
+    expect(mockSetItem.mock.calls[0][0]).toBe('ota_gateway_last_updated');
   });
 
   it('returns error with message when fetch fails', async () => {
@@ -124,7 +135,8 @@ describe('attemptOtaUpdate', () => {
       message: 'Download failed',
     });
     expect(mockReload).not.toHaveBeenCalled();
-    expect(mockSetItem).not.toHaveBeenCalled();
+    // Timestamp is saved at attempt start, regardless of outcome.
+    expect(mockSetItem).toHaveBeenCalledOnce();
   });
 
   it('returns error with message when reload fails', async () => {

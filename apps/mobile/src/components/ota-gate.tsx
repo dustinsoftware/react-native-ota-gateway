@@ -11,13 +11,24 @@ type GateStatus = 'loading' | 'ready' | 'checking';
 
 const STALE_DAYS = 1;
 
+// Memoizes gate resolution across surface remounts within one JS runtime. In
+// brownfield hosts every native tab switch tears down and remounts the RN
+// surface (all sharing one runtime); without this, each remount would re-run
+// the check and flash "Updating". An OTA reload restarts the runtime, which
+// naturally resets this back to false.
+let resolvedThisRuntime = false;
+
 /**
- * Blocks app rendering while it checks for an OTA update when the device is
- * running the embedded JS bundle (no cached OTA) or when the last confirmed
- * update is over 24 hours old.
+ * Blocks app rendering while it checks for an OTA update iff the last OTA
+ * attempt is missing or over 24 hours old. The policy is attempt-based: the
+ * timestamp is saved once per real attempt regardless of outcome, so the gate
+ * blocks at most once per 24h window and there is no embedded-launch special
+ * case.
  *
- * On fresh launches within the staleness window, children render immediately
- * and the native `checkAutomatically: ALWAYS` config handles background updates.
+ * Resolution is memoized once per JS runtime: after the gate reaches 'ready',
+ * later surface mounts in the same runtime render children immediately and
+ * synchronously -- no async timestamp read, no blank frame, no "Updating"
+ * flash on brownfield tab switches.
  *
  * If the update check FAILS (offline, server error), the gate falls through to
  * render the embedded bundle -- it is a complete, runnable app -- rather than
@@ -26,9 +37,11 @@ const STALE_DAYS = 1;
 export function OtaGate({ children }: { children: React.ReactNode }) {
   const isNative = Platform.OS !== 'web' && !__DEV__ && Updates.isEnabled;
 
-  // Start in 'loading' on native (need async timestamp read) or 'ready' on web.
+  // Start 'ready' on web, or when this runtime already resolved the gate (a
+  // brownfield remount) -- no async read, no "Updating" flash. Otherwise start
+  // 'loading' on native to read the timestamp asynchronously.
   const [status, setStatus] = useState<GateStatus>(
-    isNative ? 'loading' : 'ready',
+    !isNative || resolvedThisRuntime ? 'ready' : 'loading',
   );
   const attemptingRef = useRef(false);
 
@@ -48,24 +61,20 @@ export function OtaGate({ children }: { children: React.ReactNode }) {
     if (result.outcome === 'error') {
       console.warn('[OTA] update check failed; continuing with current bundle:', result.message);
     }
+    resolvedThisRuntime = true;
     setStatus('ready');
   }, []);
 
   useEffect(() => {
-    if (!isNative) return;
+    if (!isNative || resolvedThisRuntime) return;
 
     async function init() {
-      // Embedded launch always needs a gate (no cached OTA at all).
-      if (Updates.isEmbeddedLaunch) {
-        runUpdate();
-        return;
-      }
-
-      // Non-embedded: check if the last confirmed update is stale.
+      // Gate iff the last OTA attempt is missing or >24h old.
       const timestamp = await getLastOtaTimestamp();
       if (isOtaStale(timestamp, STALE_DAYS)) {
         runUpdate();
       } else {
+        resolvedThisRuntime = true;
         setStatus('ready');
       }
     }

@@ -3,7 +3,12 @@ import * as SecureStore from 'expo-secure-store';
 const OTA_TIMESTAMP_KEY = 'ota_gateway_last_updated';
 const MS_PER_DAY = 86_400_000;
 
-/** Persist the current time as the last-confirmed-update timestamp. */
+/**
+ * Persist the current time as the last-OTA-ATTEMPT time. Saved once per real
+ * attempt regardless of outcome (success, no-update, or error). The key name
+ * `ota_gateway_last_updated` is historical -- it now tracks the last attempt,
+ * not the last confirmed update.
+ */
 export async function saveOtaTimestamp(): Promise<void> {
   try {
     await SecureStore.setItemAsync(OTA_TIMESTAMP_KEY, String(Date.now()));
