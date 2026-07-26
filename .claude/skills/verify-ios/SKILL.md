@@ -38,24 +38,27 @@ by flipping a setting (this is the key iOS-vs-Android difference).
 ## Preconditions (both modes)
 
 1. `pnpm install`
-2. `pnpm typecheck && pnpm test` -- the CI gate; must be green first.
-3. `pnpm --filter @ota-gateway/mobile export` -- exports all platforms and
+2. Code-signing keys exist (`apps/mobile/certs/`): once per clone, run
+   `cd apps/mobile && node scripts/generate-code-signing-keys.mjs`. Export and
+   prebuild fail loudly without them (see docs/ota-updates.md, Code signing).
+3. `pnpm typecheck && pnpm test` -- the CI gate; must be green first.
+4. `pnpm --filter @ota-gateway/mobile export` -- exports all platforms and
    regenerates the OTA manifest. **Never run `npx expo export` directly** (Metro
    never exits and it hangs).
-4. Gateway containers up: `docker compose up --build -d` (`gateway-dev` :3000 /
+5. Gateway containers up: `docker compose up --build -d` (`gateway-dev` :3000 /
    `gateway-prod` :3001). **Mode B is served ONLY from these Docker
    containers** -- never from host-run `pnpm server:*` (those are for
    standalone-web iteration). The images bake `dist/`, so re-run with
    `--build` after every export. Mode A always uses the Expo/Metro dev server.
-5. Tooling present: `xcodegen`, Xcode CLT, `ccache` (`brew install xcodegen ccache`).
+6. Tooling present: `xcodegen`, Xcode CLT, `ccache` (`brew install xcodegen ccache`).
    The first `package-ios.sh` builds RN from source -- **cold builds run 30-60+
    min**; ~2-6 min with a warm ccache. It is not hung; let it finish.
-6. The iOS simulator reaches `localhost:3000/:3001/:8081` directly -- no `adb
+7. The iOS simulator reaches `localhost:3000/:3001/:8081` directly -- no `adb
    reverse` equivalent needed. Cleartext to localhost is allowed via
    `NSAllowsLocalNetworking` in `Info.plist`.
-7. Check for a stray Metro before starting one: `lsof -i :8081 -i :3000 -i :3001`.
+8. Check for a stray Metro before starting one: `lsof -i :8081 -i :3000 -i :3001`.
    A Metro from another checkout on `:8081` silently feeds the host the wrong bundle.
-8. `package-ios.sh` ends with an App Store versioning gate on every
+9. `package-ios.sh` ends with an App Store versioning gate on every
    configuration, Debug included -- the packaged `OtaGatewayLib.framework` must
    carry `CFBundleShortVersionString` matching `app.json`'s `expo.version`
    (ITMS-90057 class). On a gate failure the generated `ios/` dir is stale:

@@ -126,6 +126,7 @@ the self-hosted OTA backend and the standalone web target:
 
 ```
 pnpm install
+(cd apps/mobile && node scripts/generate-code-signing-keys.mjs)   # once per clone: OTA code-signing keys
 pnpm --filter @ota-gateway/mobile export     # export all platforms + generate the OTA manifest
 docker compose up --build -d                  # the gateway, as two Docker containers
 ```

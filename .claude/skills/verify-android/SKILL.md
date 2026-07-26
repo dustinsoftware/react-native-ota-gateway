@@ -38,18 +38,21 @@ to switch modes. The toggle defaults **off** and persists in prefs.
 ## Preconditions (both modes)
 
 1. `pnpm install`
-2. `pnpm typecheck && pnpm test` -- the CI gate; must be green first.
-3. `pnpm --filter @ota-gateway/mobile export` -- exports all platforms + manifest.
+2. Code-signing keys exist (`apps/mobile/certs/`): once per clone, run
+   `cd apps/mobile && node scripts/generate-code-signing-keys.mjs`. Export and
+   prebuild fail loudly without them (see docs/ota-updates.md, Code signing).
+3. `pnpm typecheck && pnpm test` -- the CI gate; must be green first.
+4. `pnpm --filter @ota-gateway/mobile export` -- exports all platforms + manifest.
    **Never run `npx expo export` directly** (Metro never exits -> hangs).
-4. Gateway containers up: `docker compose up --build -d` (`gateway-dev` :3000 /
+5. Gateway containers up: `docker compose up --build -d` (`gateway-dev` :3000 /
    `gateway-prod` :3001). **Mode B is served ONLY from these Docker
    containers** -- never from host-run `pnpm server:*` (those are for
    standalone-web iteration). The images bake `dist/`, so re-run with
    `--build` after every export. Mode A always uses the Expo/Metro dev server.
-5. Tooling: JDK 17, Android SDK (compileSdk 36, an emulator), Gradle 8.14.4
+6. Tooling: JDK 17, Android SDK (compileSdk 36, an emulator), Gradle 8.14.4
    (wrapper), minSdk 24. Have an emulator **running** (or a device connected)
    before the `adb` / install steps (`adb devices` should list one).
-6. **Port reversing (emulator too, not just physical devices):**
+7. **Port reversing (emulator too, not just physical devices):**
    ```
    adb reverse tcp:3000 tcp:3000
    adb reverse tcp:3001 tcp:3001
@@ -58,7 +61,7 @@ to switch modes. The toggle defaults **off** and persists in prefs.
    Without `:8081` in Mode A the app's own `localhost` requests die even if the
    bundle loads; without `:3000`/`:3001`, OTA against the local servers fails.
    Cleartext is permitted via `network_security_config.xml`.
-7. Check for a stray Metro first: `lsof -i :8081 -i :3000 -i :3001`.
+8. Check for a stray Metro first: `lsof -i :8081 -i :3000 -i :3001`.
 
 ## Build + install the host (both modes)
 
@@ -137,6 +140,12 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
 
 ## Footguns
 
+- On Android 16+ (API 37) emulator images the host toolbar draws under the
+  status bar (edge-to-edge enforcement), so Maestro treats the toolbar title
+  ("OTA Gateway Host") as not visible and "Navigate up" taps can hit the
+  status bar -- `verify-more-tab-android.yaml` fails on those images even on
+  an unchanged tree. Use an API 36 image, or verify the flow's assertions
+  manually (`uiautomator dump` shows the title present but occluded).
 - Forgetting `adb reverse` on the **emulator**: the bundle may load (RN dev
   special-cases the emulator) but the app's own `localhost` calls fail.
 - `adb install -r` keeps the toggle state -- an unexpected Mode A/B can persist
