@@ -35,11 +35,39 @@ tab -> RN tab changes are driven over the existing native<->RN message bridge:
 3. **JS listener.** `TabSelectGuard` (`src/components/tab-select-guard.tsx`),
    mounted in `src/app/_layout.tsx` ABOVE `<OtaGate>` (so its bridge
    subscription exists even while the OTA gate blocks children), handles
-   `selectTab` by calling `router.navigate(route)`. It is readiness-aware: it
-   holds the latest requested route and dispatches only once the root
-   navigation ref reports ready (expo-router 55's `routingQueue` silently drops
-   actions before the navigation ref exists), then verifies the landed tab and
-   retries once if needed. It is a no-op on web/standalone.
+   `selectTab` by dispatching a **targeted `JUMP_TO`** at the `(tabs)`
+   navigator -- the SAME action a native tab press does
+   (`NativeBottomTabsNavigator.onTabChange`). It is a no-op on web/standalone.
+
+   **Why a targeted `JUMP_TO`, not `router.navigate`.** The shell tabs live
+   under the `(tabs)` `NativeTabs` navigator, whose router is React
+   Navigation's plain `TabRouter` (state type `'tab'`). `router.navigate(path)`
+   routes through expo-router's global `linkTo`, which merely ENQUEUES a
+   `ROUTER_LINK` action drained asynchronously by a NavigationContainer effect
+   (the `routingQueue`). In the brownfield host that async drain intermittently
+   dropped the tab change -- the RN content stayed on the mount-time tab while
+   only the native chrome (bottom-bar highlight) moved (observed on-device,
+   Mode A, right after first open). A targeted `JUMP_TO` is a synchronous,
+   direct navigator dispatch that bypasses the routing queue, so it commits
+   reliably. `TabSelectGuard` resolves the live tabs navigator's `state.key`
+   fresh per dispatch from `navigationRef.getRootState()` (matched by route
+   names via `findTabsStateKey` in `nav-restore.ts`); an UNtargeted `JUMP_TO`
+   from the root container ref would stop at the root Stack and never reach the
+   tab router.
+
+   **Readiness is the tabs KEY, not `navigationRef.isReady()`.** In the
+   brownfield single-root host `navigationRef.isReady()` can read FALSE even
+   though the router store is fully functional (`usePathname()` resolves,
+   `getRootState()` returns the tree). An earlier version gated dispatch on
+   `isReady()` and that stranded every tab switch. The guard instead gates on
+   `findTabsStateKey` resolving a key: while the key is not yet resolvable it
+   POLLS on a real delay, re-dispatching the targeted `JUMP_TO` until the
+   observed pathname's owning tab matches the request, then stops. A bounded
+   deadline guarantees the poll always terminates; last request wins. The
+   in-place switch does NOT restore a deep in-tab path (with one persistent root
+   each tab's nested stack stays mounted, so a `JUMP_TO` reveals it as-left);
+   cross-JS-lifetime restore is owned by the MOUNT path (`resolveInitialLocation`
+   + `nav:activeTab`), not this handler.
 
    **`tabsReady` handshake (cold-start lost-tap recovery).** A native tab tap
    can race the JS `selectTab` subscription two ways on a cold start: (a) the
@@ -65,13 +93,9 @@ tab -> RN tab changes are driven over the existing native<->RN message bridge:
    transient SECOND ExpoRoot in the same JS runtime. expo-router 55 keeps its
    whole router store -- including the ref `useNavigationContainerRef()`
    returns -- in a single module-global slot shared by every ExpoRoot; two
-   concurrent mounts clobber it, so `TabSelectGuard`'s
-   `navigationRef.isReady()` could read a container detached on unmount and
-   poll forever, permanently stranding the shell on its mount-time tab even
-   though a container was on screen. Dropping the remount keeps exactly one
-   ExpoRoot (matching iOS, which never remounted here), so `isReady()` is
-   reliable and the poll always terminates. Do NOT reintroduce a remount on the
-   RN-tab -> RN-tab path.
+   concurrent mounts clobber it and can strand the shell on its mount-time tab.
+   Dropping the remount keeps exactly one ExpoRoot (matching iOS, which never
+   remounted here). Do NOT reintroduce a remount on the RN-tab -> RN-tab path.
 4. **Known-route validation lives in the handler.** The Zod schema
    (`selectTabSchema` in `message-bridge.types.ts`) types `route` as a bare
    string; the SET of known tab routes is checked in `applySelectTab`

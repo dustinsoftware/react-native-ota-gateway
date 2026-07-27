@@ -84,6 +84,38 @@ export function tabForPath(path: string): TabRoute | null {
   return null;
 }
 
+/** Minimal shape of a React Navigation state node we traverse (see below). */
+export interface NavStateNode {
+  key?: string;
+  type?: string;
+  routes?: { name?: string; state?: NavStateNode }[];
+}
+
+/**
+ * The `state.key` of the live `'tab'` navigator that hosts the shell tabs
+ * within a `getRootState()` tree, or undefined if it is not (yet) mounted.
+ * Matched by route NAMES (the bare segment, e.g. `developer`) so it cannot
+ * accidentally target some other tab navigator: every known shell tab name must
+ * be present. TabSelectGuard uses this as its readiness+target signal for a
+ * targeted JUMP_TO -- resolved fresh on every dispatch, since the key changes
+ * across a navigator remount and must not be cached. Pure/undefined-safe so it
+ * is unit-testable without a live navigator.
+ */
+export function findTabsStateKey(state: NavStateNode | undefined): string | undefined {
+  if (!state || !Array.isArray(state.routes)) return undefined;
+  if (state.type === 'tab') {
+    const names = new Set(state.routes.map((route) => route.name));
+    if (KNOWN_TAB_ROUTES.every((route) => names.has(route.slice(1)))) {
+      return state.key;
+    }
+  }
+  for (const route of state.routes) {
+    const found = findTabsStateKey(route.state);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 // Module-global by design. With the single-root host there is still AT MOST
 // ONE restore-enabled surface live per runtime (the one-ExpoRoot rule).
 // `restoreEnabled` is latched once at mount by configureNavRestore and gates

@@ -5,6 +5,7 @@ import {
   checkpointActiveTab,
   checkpointNavPath,
   configureNavRestore,
+  findTabsStateKey,
   isKnownTabRoute,
   KNOWN_TAB_ROUTES,
   resolveInitialLocation,
@@ -305,6 +306,62 @@ describe('nav-restore', () => {
 
       applySelectTab('/sky', navigate);
       expect(navigate).toHaveBeenCalledWith('/sky/deep');
+    });
+  });
+
+  describe('findTabsStateKey (targeted JUMP_TO readiness + target)', () => {
+    // Mirrors a real expo-router getRootState() tree in the brownfield host:
+    // stack -> __root(stack) -> (tabs)(tab) -> developer(stack)/sky/spinner.
+    const rootState = {
+      type: 'stack',
+      routes: [
+        {
+          name: '__root',
+          state: {
+            type: 'stack',
+            routes: [
+              {
+                name: '(tabs)',
+                state: {
+                  type: 'tab',
+                  key: 'tab-XYZ',
+                  routes: [
+                    { name: 'developer', state: { type: 'stack', routes: [{ name: 'index' }] } },
+                    { name: 'sky' },
+                    { name: 'spinner' },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    it('locates the tab navigator key deep in the tree', () => {
+      expect(findTabsStateKey(rootState)).toBe('tab-XYZ');
+    });
+
+    it('is undefined for a missing/empty state (not yet mounted)', () => {
+      expect(findTabsStateKey(undefined)).toBeUndefined();
+      expect(findTabsStateKey({ type: 'stack', routes: [] })).toBeUndefined();
+    });
+
+    it('ignores a tab navigator that lacks a known shell tab (no false target)', () => {
+      const other = {
+        type: 'stack',
+        routes: [
+          {
+            name: 'x',
+            state: {
+              type: 'tab',
+              key: 'other-tab',
+              routes: [{ name: 'developer' }, { name: 'sky' }], // no spinner
+            },
+          },
+        ],
+      };
+      expect(findTabsStateKey(other)).toBeUndefined();
     });
   });
 });

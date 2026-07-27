@@ -348,8 +348,9 @@ see [single-root-tabs-experiment.md](./single-root-tabs-experiment.md)):
   the shell keeps the surface, updates its native chrome, persists the
   selection, and posts `{ "type": "selectTab", "route": <path> }` over the
   bridge (`ReactNativeBrownfield.shared.postMessage`, serialized with
-  `JSONSerialization`). The RN app's `TabSelectGuard` handles it with
-  `router.navigate` -- no teardown, no flash.
+  `JSONSerialization`). The RN app's `TabSelectGuard` handles it with a
+  targeted `JUMP_TO` on the `(tabs)` navigator (see
+  docs/single-root-tabs-experiment.md) -- no teardown, no flash.
 - **Hard mount otherwise.** The native More tab tears the RN surface down and
   embeds `MoreMenuViewController`; a first mount or a return from More mounts a
   fresh surface through `BrownfieldReloader.makeViewController` with `/developer`,
