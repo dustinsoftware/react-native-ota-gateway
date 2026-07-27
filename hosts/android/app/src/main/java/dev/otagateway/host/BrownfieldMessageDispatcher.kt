@@ -28,6 +28,7 @@ object BrownfieldMessageDispatcher {
         data object Reload : BrownfieldMessage
         data class SaveState(val key: String, val stateJson: String) : BrownfieldMessage
         data class Navigate(val destination: String) : BrownfieldMessage
+        data object TabsReady : BrownfieldMessage
     }
 
     fun register(context: Context) {
@@ -41,6 +42,8 @@ object BrownfieldMessageDispatcher {
                         HostStateStore.write(appContext, parsed.key, parsed.stateJson)
                     is BrownfieldMessage.Navigate ->
                         HostNavigationHandler.open(appContext, parsed.destination)
+                    is BrownfieldMessage.TabsReady ->
+                        TabsReadyRelay.announce()
                     null -> Unit
                 }
             },
@@ -71,6 +74,7 @@ object BrownfieldMessageDispatcher {
                     json.optString("destination").takeIf(String::isNotEmpty)
                         ?.let { BrownfieldMessage.Navigate(it) }
                 }
+                Brownfield.TABS_READY_MESSAGE_TYPE -> BrownfieldMessage.TabsReady
                 else -> null
             }
         } catch (e: JSONException) {

@@ -33,9 +33,45 @@ tab -> RN tab changes are driven over the existing native<->RN message bridge:
    the same bridge the host-state and nav seams already use
    (`ReactNativeBrownfield.shared.postMessage`).
 3. **JS listener.** `TabSelectGuard` (`src/components/tab-select-guard.tsx`),
-   mounted in `src/app/_layout.tsx` next to `NavStateGuard`, handles `selectTab`
-   by
-   calling `router.replace(route)`. It is a no-op on web/standalone.
+   mounted in `src/app/_layout.tsx` ABOVE `<OtaGate>` (so its bridge
+   subscription exists even while the OTA gate blocks children), handles
+   `selectTab` by calling `router.navigate(route)`. It is readiness-aware: it
+   holds the latest requested route and dispatches only once the root
+   navigation ref reports ready (expo-router 55's `routingQueue` silently drops
+   actions before the navigation ref exists), then verifies the landed tab and
+   retries once if needed. It is a no-op on web/standalone.
+
+   **`tabsReady` handshake (cold-start lost-tap recovery).** A native tab tap
+   can race the JS `selectTab` subscription two ways on a cold start: (a) the
+   post is emitted after the TurboModule event emitter wires up but before this
+   listener subscribes -- delivered into the void, no error; or (b) even
+   earlier, the emitter itself is not wired and the native
+   `postMessage`/`emitOnBrownfieldMessage` throws. To close both windows,
+   `TabSelectGuard` posts `{ "type": "tabsReady" }` ONCE per tab-surface mount,
+   right after it subscribes its message listener (only when
+   `isBrownfieldHost() && isNavRestoreEnabled()`, so pushed screens never
+   participate). Each host relays it (`TabsReadyRelay` on both platforms) and
+   re-posts its currently-selected tab -- which `navigateTo`/`selectTab` has
+   already updated to the tapped tab BEFORE posting -- and the JS side applies
+   the re-post idempotently (already-there routes no-op). Because the listener
+   subscribes BEFORE `tabsReady` is sent, the emitter cannot throw after the
+   handshake fires, so an emitter-not-ready failure always has a pending
+   handshake to recover it.
+
+   **No remount on a lost tap (the one-ExpoRoot rule).** The host does NOT
+   remount the surface when a `selectTab` post fails; it relies on the
+   handshake above. An earlier Android build DID remount on the emitter-not-
+   ready throw (`removeMountedFragment()` + `mountFragment()`), which mounted a
+   transient SECOND ExpoRoot in the same JS runtime. expo-router 55 keeps its
+   whole router store -- including the ref `useNavigationContainerRef()`
+   returns -- in a single module-global slot shared by every ExpoRoot; two
+   concurrent mounts clobber it, so `TabSelectGuard`'s
+   `navigationRef.isReady()` could read a container detached on unmount and
+   poll forever, permanently stranding the shell on its mount-time tab even
+   though a container was on screen. Dropping the remount keeps exactly one
+   ExpoRoot (matching iOS, which never remounted here), so `isReady()` is
+   reliable and the poll always terminates. Do NOT reintroduce a remount on the
+   RN-tab -> RN-tab path.
 4. **Known-route validation lives in the handler.** The Zod schema
    (`selectTabSchema` in `message-bridge.types.ts`) types `route` as a bare
    string; the SET of known tab routes is checked in `applySelectTab`
@@ -51,19 +87,34 @@ tab -> RN tab changes are driven over the existing native<->RN message bridge:
 The subtle case is Android's OTA reload. A reload relaunches the shared
 `ReactHost` **in place**, so the mounted fragment re-mounts JS with its
 mount-time `initialUrl` (the fragment's stale initial route), NOT the tab the
-user last selected. To land on the right tab, the `selectTab` handler records
-the selection:
+user last selected. Restoration is DERIVED from observed reality rather than
+re-pointed:
 
-- `applySelectTab(route, navigate)` resolves the target path, calls
-  `checkpointActiveTab(route)` (writes the `nav:activeTab` host-state slice),
-  `setActiveNavSurface(route)` (re-points continuous checkpointing at the new
-  tab in place, since there is no remount), and finally `navigate(target)`.
-- On the next mount, `resolveInitialLocation` gives a fresh `nav:activeTab`
-  slice naming a known tab precedence over the mount-time `initialUrl`, then
-  resolves that tab's own saved path (`nav:<route>`, 30-min TTL). Pushed
-  screens (which do not opt into `restoreNavState`) are unaffected.
+- `applySelectTab(route, navigate)` ONLY validates the route, resolves the
+  target path (`resolveTabPath`), and navigates. It does NOT checkpoint or
+  re-point anything -- there is no `setActiveNavSurface` / "active surface"
+  pointer anymore.
+- Attribution follows the OBSERVED pathname. Once the navigation commits,
+  `NavStateGuard` checkpoints both the per-tab slice (`checkpointNavPath`) and
+  `nav:activeTab` (`checkpointActiveTab`), each DERIVING its owning tab from the
+  pathname itself (`tabForPath`: the known tab `t` where `path === t` or
+  `path.startsWith(t + '/')`). A lagging emission is therefore always filed
+  under the tab it actually names -- the fix for the on-device stall where
+  re-pointing wrote the old tab's route under the new tab's key.
+- On the next mount, `resolveInitialLocation(initialUrl, mountedAt)` honors a
+  fresh `nav:activeTab` slice ONLY when it names a known tab AND was saved
+  AFTER `mountedAt` -- the wall-clock stamp each host mints per fresh mount.
+  That "selection post-dates these props" condition is true ONLY for an
+  in-place reload reusing STALE props; a genuinely fresh mount targeting a new
+  tab (More -> Spinner) carries a current `mountedAt`, so `initialUrl` stays
+  authoritative and the mount is never hijacked back. The chosen tab's own
+  saved path is then resolved.
+- `resolveTabPath` accepts a saved slice's path ONLY when it is genuinely owned
+  by that tab (`=== route` or nested under it), so an already-polluted store
+  cannot re-stall the surface. Pushed screens (which do not opt into
+  `restoreNavState`) are unaffected.
 
-`nav:activeTab` is a new host-state key on the same store/seam; the 16KB and
+`nav:activeTab` is a host-state key on the same store/seam; the 16KB and
 secret-name checkpoint rules apply to it like any other slice.
 
 ### Why the documented brownfield bugs do NOT apply

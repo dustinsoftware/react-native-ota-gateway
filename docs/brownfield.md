@@ -349,14 +349,14 @@ see [single-root-tabs-experiment.md](./single-root-tabs-experiment.md)):
   selection, and posts `{ "type": "selectTab", "route": <path> }` over the
   bridge (`ReactNativeBrownfield.shared.postMessage`, serialized with
   `JSONSerialization`). The RN app's `TabSelectGuard` handles it with
-  `router.replace` -- no teardown, no flash.
+  `router.navigate` -- no teardown, no flash.
 - **Hard mount otherwise.** The native More tab tears the RN surface down and
   embeds `MoreMenuViewController`; a first mount or a return from More mounts a
   fresh surface through `BrownfieldReloader.makeViewController` with `/developer`,
-  `/sky`, or `/spinner` as `initialUrl` (plus the `savedStateJson` and
-  `restoreNavState` props); and while a restart is in flight the shell only
-  persists the selection -- `rebuildActiveSurface` materializes it once the
-  runtime is back.
+  `/sky`, or `/spinner` as `initialUrl` (plus the `savedStateJson`,
+  `restoreNavState`, and a fresh `mountedAt` props); and while a restart is in
+  flight the shell only persists the selection -- `rebuildActiveSurface`
+  materializes it once the runtime is back.
 
 The reloader tracks the one live RN controller weakly. On reload it (1) stops
 RN, (2) calls `OtaGatewayLib.relaunchUpdates` -- which runs expo-updates'
@@ -571,6 +571,9 @@ ReactNativeFragment.createReactNativeFragment(
         "initialUrl" to path,
         Brownfield.SAVED_STATE_PROP to HostStateStore.readAllJson(this),
         Brownfield.RESTORE_NAV_STATE_PROP to true,
+        // Wall-clock stamp (ms since epoch) gating the nav:activeTab override
+        // -- see the host-state seam below and nav-restore.ts.
+        Brownfield.MOUNTED_AT_PROP to System.currentTimeMillis(),
     ),
 )
 ```
@@ -596,7 +599,9 @@ alive across tab changes. `navigateTo` applies a tab selection as:
   RN surface down and a lazily-built native More menu view is swapped into the
   container, so while More is selected the only live RN surface is a pushed one.
 - **More -> RN tab:** the menu is removed and a FRESH fragment is mounted with
-  `initialUrl` / `savedStateJson` / `restoreNavState = true`.
+  `initialUrl` / `savedStateJson` / `restoreNavState = true` / a fresh
+  `mountedAt` (so the fresh mount is never hijacked back to a stale
+  `nav:activeTab` -- see the host-state seam below).
 
 `onCreate` still mounts whatever `HostRoutePrefs` records, which covers a fresh
 launch, rotation, process death, and OTA relaunch. There is no in-flight OTA
@@ -691,26 +696,36 @@ flows stay idempotent).
 **Per-tab navigation restoration** rides the same seam
 (`src/brownfield/nav-restore.ts`). Tab mounts pass `restoreNavState: true`
 (pushed screens deliberately do not), and the root layout's `NavStateGuard`
-checkpoints the active surface's current path (slice `nav:<route>`, 30-minute
-TTL) via `checkpointNavPath`. Two granularities feed restoration:
+checkpoints the OBSERVED pathname on every change via `checkpointNavPath` and
+`checkpointActiveTab`. Attribution is DERIVED, never re-pointed: each checkpoint
+finds the owning tab of the observed path with `tabForPath` (the known tab `t`
+where `path === t` or `path.startsWith(t + '/')`), so a lagging emission is
+always filed under the tab it actually names. Two granularities feed
+restoration:
 
 - a per-tab slice `nav:<route>` holding that tab's last in-surface path,
   resolved by `resolveTabPath`, and
 - a single **`nav:activeTab`** slice naming the currently selected tab, written
-  by `checkpointActiveTab` whenever the `selectTab` handler switches tabs.
+  by `checkpointActiveTab` from the observed pathname.
 
 Because the single-root host changes the active RN tab **in place** (a
 `selectTab` bridge message, not a remount -- see
 [single-root-tabs-experiment.md](./single-root-tabs-experiment.md)),
-`applySelectTab` re-points checkpointing at the new tab with
-`setActiveNavSurface` rather than relying on a fresh mount. On the next mount
-`resolveInitialLocation` gives a fresh `nav:activeTab` slice naming a known tab
-precedence over the fragment's mount-time `initialUrl`, then resolves that
-tab's saved path -- this is how Android's in-place OTA reload (which re-mounts
-JS with the stale fragment `initialUrl`) still lands on the tab the user
-selected. Only the PATH is restored (expo-router rebuilds the stack from the
-URL); every read tolerates a missing/malformed/unknown-route slice by falling
-back to the tab root or `initialUrl`. `.maestro/verify-nav-restore-{ios,android}.yaml`
+`applySelectTab` ONLY validates the route, resolves the target with
+`resolveTabPath`, and navigates -- it does NOT checkpoint or re-point (there is
+no `setActiveNavSurface` / active-surface pointer anymore; attribution follows
+the observed pathname above). On the next mount
+`resolveInitialLocation(initialUrl, mountedAt)` honors a fresh `nav:activeTab`
+slice naming a known tab over the fragment's mount-time `initialUrl` ONLY when
+the slice was saved AFTER `mountedAt` (the wall-clock stamp each host mints per
+fresh mount) -- i.e. an in-place OTA reload reusing STALE props. A genuinely
+fresh mount targeting a new tab carries a current `mountedAt`, so `initialUrl`
+stays authoritative and is never hijacked back. `resolveTabPath` additionally
+rejects any saved path not genuinely owned by its tab, so an already-polluted
+store cannot re-stall the surface. Only the PATH is restored (expo-router
+rebuilds the stack from the URL); every read tolerates a
+missing/malformed/unknown-route slice by falling back to the tab root or
+`initialUrl`. `.maestro/verify-nav-restore-{ios,android}.yaml`
 pin the roundtrip.
 
 ## RN -> native navigation (the navigate seam)

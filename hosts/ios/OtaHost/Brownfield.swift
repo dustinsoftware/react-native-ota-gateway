@@ -28,8 +28,15 @@ enum Brownfield {
     static let navigateMessageType = "navigate"
     /// Message `type` the host posts to the persistent RN surface to switch
     /// the active tab route WITHOUT a remount. The JS listener responds with
-    /// `router.replace(route)`. Payload: `{ "type": "selectTab", "route": <path> }`.
+    /// `router.navigate(route)`. Payload: `{ "type": "selectTab", "route": <path> }`.
     static let selectTabMessageType = "selectTab"
+    /// Message `type` the JS posts RN -> native once the tab surface's
+    /// `selectTab` listener is subscribed (shared contract with Android).
+    /// Closes the cold-start lost-message window: a tab tap after the
+    /// TurboModule event emitter wires up but before the JS listener
+    /// subscribes is emitted into the void, so on this handshake the shell
+    /// re-posts its selected tab (idempotent on the JS side).
+    static let tabsReadyMessageType = "tabsReady"
     /// The `navigate` destination for the native Host Settings screen.
     static let settingsDestination = "settings"
     /// Key of the initial property carrying the persisted component-state
@@ -38,6 +45,13 @@ enum Brownfield {
     /// Initial property opting a surface into resuming its last in-surface
     /// path (tab mounts only; shared contract with Android and nav-restore.ts).
     static let restoreNavStateKey = "restoreNavState"
+    /// Initial property carrying the wall-clock instant (ms since epoch) these
+    /// initial props were minted. nav-restore honors a `nav:activeTab` override
+    /// ONLY when the user's selection post-dates this stamp -- i.e. an in-place
+    /// OTA reload reusing STALE props -- so a genuinely fresh mount (More -> RN
+    /// tab) is never hijacked back to a previously-selected tab (shared
+    /// contract with Android and nav-restore.ts's resolveInitialLocation).
+    static let mountedAtKey = "mountedAt"
 }
 
 /// A native host tab. RN tabs (`route != nil`) mount exactly one RN surface at
@@ -92,6 +106,10 @@ enum BrownfieldMessage: Equatable {
     /// Asks the host to navigate to a native screen (e.g. Test 2's "Open
     /// native Settings" button) -- the reverse of the More tab pushing RN.
     case navigate(destination: String)
+    /// Announces the tab surface's `selectTab` listener is subscribed; the
+    /// shell re-posts its selected tab to recover any tap that raced the
+    /// subscription (see Brownfield.tabsReadyMessageType).
+    case tabsReady
 }
 
 /// The host's selected OTA environment, persisted to `UserDefaults`.

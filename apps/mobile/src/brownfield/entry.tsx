@@ -28,20 +28,23 @@ function BrownfieldApp(props: {
   initialUrl?: string;
   savedStateJson?: string;
   restoreNavState?: boolean;
+  mountedAt?: number;
 }) {
   const [state] = useState(() => {
     hydrateHostSavedState(props.savedStateJson);
     // Tab surfaces opt in to resuming their last in-surface path (pushed
     // screens stay fresh-by-design); must run AFTER hydration, before render.
     // With the single persistent root, an OTA reload re-mounts JS with the
-    // fragment's stale mount-time initialUrl, so resolveInitialLocation also
-    // prefers the `activeTab` slice (the tab the user last selected) over
-    // initialUrl -- see nav-restore.ts. Pushed screens pass restoreNavState
-    // absent/false and are unaffected.
+    // fragment's stale mount-time initialUrl, so resolveInitialLocation may
+    // prefer the `activeTab` slice (the tab the user last selected) over
+    // initialUrl -- but ONLY when that selection post-dates this mount's
+    // `mountedAt` (the in-place-reload signal), so a legitimately fresh mount
+    // targeting a new tab is never hijacked back. See nav-restore.ts. Pushed
+    // screens pass restoreNavState absent/false and are unaffected.
     configureNavRestore(props.initialUrl, props.restoreNavState === true);
     return {
       context: freshRouteContext(ctx),
-      location: resolveInitialLocation(props.initialUrl),
+      location: resolveInitialLocation(props.initialUrl, props.mountedAt),
     };
   });
   return <ExpoRoot context={state.context} location={state.location} />;

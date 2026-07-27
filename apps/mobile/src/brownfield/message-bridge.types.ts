@@ -15,7 +15,15 @@ export type RNToNativeMessage =
   // as the `savedStateJson` initial property on every RN surface it mounts, so
   // a dismissed component resumes exactly where it left off (see
   // src/brownfield/host-state.ts).
-  | { type: 'saveState'; key: string; state: Record<string, unknown> };
+  | { type: 'saveState'; key: string; state: Record<string, unknown> }
+  // Announces that the tab surface's `selectTab` listener is subscribed and
+  // ready (posted once per tab-surface mount by TabSelectGuard). Closes the
+  // lost-message window on cold start: a native tab tap after the TurboModule
+  // event emitter wires up but BEFORE the JS listener subscribes is emitted
+  // into the void. On receipt the host re-posts the currently selected tab;
+  // the JS handler is idempotent (already-there routes no-op). Hosts that
+  // predate this type simply ignore it (docs/version-skew.md).
+  | { type: 'tabsReady' };
 
 // -- Native -> RN messages ---------------------------------------------------
 

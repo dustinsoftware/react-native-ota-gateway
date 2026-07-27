@@ -35,6 +35,8 @@ enum BrownfieldBootstrap {
                 HostStateStore.write(sliceKey: key, stateJson: stateJson)
             case let .navigate(destination):
                 presentNativeDestination(destination)
+            case .tabsReady:
+                TabsReadyRelay.notify()
             case .none:
                 break
             }
@@ -84,6 +86,8 @@ enum BrownfieldBootstrap {
             guard let destination = json["destination"] as? String, !destination.isEmpty
             else { return nil }
             return .navigate(destination: destination)
+        case Brownfield.tabsReadyMessageType:
+            return .tabsReady
         default:
             return nil
         }

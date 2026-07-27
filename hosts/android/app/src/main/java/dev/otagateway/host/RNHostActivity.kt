@@ -133,6 +133,27 @@ class RNHostActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // JS announces its selectTab listener is live. Re-post the selected
+        // tab: a tap in the window after the event emitter wired up but before
+        // that listener subscribed was emitted into the void (no NPE, so the
+        // postSelectTab fallback never fired), which would strand the shell on
+        // the mount-time route. Re-posting is idempotent on the JS side.
+        TabsReadyRelay.listener = {
+            runOnUiThread {
+                if (!isFinishing) {
+                    currentRoute.path?.let { postSelectTab(it) }
+                }
+            }
+        }
+    }
+
+    override fun onStop() {
+        TabsReadyRelay.listener = null
+        super.onStop()
+    }
+
     /**
      * Adds or removes the Toolbar's Settings action to match [currentRoute]
      * (Developer only). Called on every tab change so the action appears and
@@ -160,6 +181,13 @@ class RNHostActivity : AppCompatActivity() {
                 // Tab surfaces resume their last in-surface path; pushed
                 // screens (RNScreenActivity) deliberately do NOT set this.
                 Brownfield.RESTORE_NAV_STATE_PROP to true,
+                // Wall-clock instant these props were minted. nav-restore only
+                // honors a `nav:activeTab` override when the user's selection
+                // POST-DATES this stamp -- i.e. an in-place OTA reload reusing
+                // these STALE props. A genuinely fresh mount (More -> RN tab)
+                // carries a current stamp, so it is never hijacked back to the
+                // old tab.
+                Brownfield.MOUNTED_AT_PROP to System.currentTimeMillis(),
             ),
         )
         supportFragmentManager.beginTransaction()
@@ -313,14 +341,30 @@ class RNHostActivity : AppCompatActivity() {
     /**
      * Posts `{"type":"selectTab","route":"<path>"}` to the RN app over the
      * brownfield bridge. The JS listener re-points the single live surface at
-     * the selected route (router.replace + nav-state re-pointing).
+     * the selected route (router.navigate; slice attribution derives from the
+     * observed pathname).
      *
-     * Falls back to a fresh mount when the bridge can't deliver yet: early in
-     * a cold start (before JS wires the TurboModule event emitter) the
-     * upstream `emitOnBrownfieldMessage` throws an NPE instead of no-oping,
-     * and a silently dropped post would strand the shell on the old tab. The
-     * remount lands on [path] via `initialUrl` + saved-nav restoration, same
-     * as the More -> RN path.
+     * Best-effort by design: it does NOT remount on failure. Early in a cold
+     * start (before JS wires the TurboModule event emitter) the upstream
+     * `emitOnBrownfieldMessage` throws instead of no-oping, and the post is
+     * lost -- but that lost tap is recovered by the `tabsReady` handshake:
+     * once the JS `selectTab` listener subscribes it posts `tabsReady`, and
+     * [onStart]'s relay re-posts [currentRoute] (already updated to the tapped
+     * tab by [navigateTo] BEFORE this call), which the JS side applies
+     * idempotently. Crucially the emitter cannot throw AFTER `tabsReady` has
+     * been sent (JS subscribes its message listener before announcing), so an
+     * emitter-not-ready failure here ALWAYS has a pending handshake to recover
+     * it.
+     *
+     * The previous NPE fallback remounted a fresh fragment
+     * (`removeMountedFragment()` + `mountFragment()`), which mounted a SECOND,
+     * transient ExpoRoot in the same JS runtime while the first was torn down.
+     * expo-router 55's router store is a single module-global slot shared by
+     * every ExpoRoot (see TabSelectGuard); two concurrent mounts clobber it, so
+     * the guard's `navigationRef.isReady()` could read a detached container and
+     * poll forever -- stranding the shell on its mount-time tab. Dropping the
+     * remount keeps the one-ExpoRoot rule (matching iOS, which never remounts
+     * here) and lets the handshake do the recovery. Do NOT reintroduce it.
      */
     private fun postSelectTab(path: String) {
         val message = JSONObject()
@@ -330,9 +374,9 @@ class RNHostActivity : AppCompatActivity() {
         try {
             ReactNativeBrownfield.shared.postMessage(message)
         } catch (e: RuntimeException) {
-            Log.w("RNHostActivity", "selectTab post failed (JS emitter not ready); remounting", e)
-            removeMountedFragment()
-            mountFragment(path)
+            // JS emitter not wired yet: the tap is recovered by the tabsReady
+            // handshake (see the KDoc above and onStart). Do not remount.
+            Log.w("RNHostActivity", "selectTab post failed (JS emitter not ready); awaiting tabsReady", e)
         }
     }
 

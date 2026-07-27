@@ -30,9 +30,14 @@ if (Platform.OS !== 'web') {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
+      {/* Above OtaGate so its bridge subscription exists even while the OTA
+          gate blocks children: a `selectTab` posted during the gate window is
+          held and dispatched once the navigator is ready (see
+          src/components/tab-select-guard.tsx). It renders null and depends only
+          on the router store + container ref, both safe above the Stack. */}
+      <TabSelectGuard />
       <OtaGate>
         <NavStateGuard />
-        <TabSelectGuard />
         <Stack screenOptions={{ headerShown: false }} />
       </OtaGate>
     </GestureHandlerRootView>

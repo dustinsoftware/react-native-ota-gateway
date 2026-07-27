@@ -10,7 +10,7 @@ import UIKit
 /// Spinner does NOT tear down and remount. Instead the shell updates its native
 /// chrome and posts a `selectTab` bridge message
 /// (`{ "type": "selectTab", "route": <path> }`) to the live surface, whose JS
-/// listener calls `router.replace(route)` -- so there is no per-tab-switch flash
+/// listener calls `router.navigate(route)` -- so there is no per-tab-switch flash
 /// (see docs/brownfield.md and docs/single-root-tabs-experiment.md). This
 /// replaces the older teardown-per-tab design.
 ///
@@ -59,6 +59,19 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
         setupTabBar()
         setupContentContainer()
         selectTab(selectedTab, persist: false)
+
+        // JS announces its selectTab listener is live. Re-post the selected
+        // tab: a tap in the window after the event emitter wired up but
+        // before that listener subscribed was emitted into the void, which
+        // would strand the shell on the mount-time route. Idempotent JS-side.
+        TabsReadyRelay.listener = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.hasMountedReactSurface,
+                      let route = self.selectedTab.route
+                else { return }
+                self.postSelectTab(route: route)
+            }
+        }
     }
 
     // MARK: - BrownfieldReloadHost
@@ -122,7 +135,7 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
         // Soft switch (RN tab -> RN tab): a persistent RN surface is already
         // mounted and the runtime is up, so keep the surface and drive the
         // route change over the bridge instead of tearing it down -- no flash.
-        // The JS listener handles the posted message with router.replace.
+        // The JS listener handles the posted message with router.navigate.
         if let route = tab.route,
            hasMountedReactSurface,
            !BrownfieldReloader.shared.isRestartInFlight {
@@ -192,6 +205,12 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
                 // Tab surfaces resume their last in-surface path across tab
                 // switches; pushed screens deliberately do NOT set this.
                 Brownfield.restoreNavStateKey: true,
+                // Wall-clock instant (ms since epoch) these props were minted.
+                // nav-restore honors a `nav:activeTab` override only when the
+                // user's selection post-dates this stamp (an in-place OTA
+                // reload reusing STALE props), so a genuinely fresh mount is
+                // never hijacked back to a previously-selected tab.
+                Brownfield.mountedAtKey: Date().timeIntervalSince1970 * 1000,
             ],
             title: tab.title
         )

@@ -32,6 +32,16 @@ object Brownfield {
      */
     const val RESTORE_NAV_STATE_PROP = "restoreNavState"
 
+    /**
+     * Initial property carrying the wall-clock instant (ms since epoch) these
+     * initial props were minted. nav-restore honors a `nav:activeTab` override
+     * ONLY when the user's selection post-dates this stamp -- i.e. an in-place
+     * OTA reload reusing STALE props -- so a genuinely fresh mount is never
+     * hijacked back to a previously-selected tab (shared contract with iOS and
+     * nav-restore.ts's resolveInitialLocation).
+     */
+    const val MOUNTED_AT_PROP = "mountedAt"
+
     /** Message `type` the JS posts after an OTA download (shared contract with iOS). */
     const val RELOAD_MESSAGE_TYPE = "reload"
 
@@ -47,6 +57,16 @@ object Brownfield {
      * selectTab listener).
      */
     const val SELECT_TAB_MESSAGE_TYPE = "selectTab"
+
+    /**
+     * Message `type` the JS posts RN -> native once the tab surface's
+     * `selectTab` listener is subscribed (shared contract with iOS). Closes
+     * the cold-start lost-message window: a tab tap after the TurboModule
+     * event emitter wires up but before the JS listener subscribes is emitted
+     * into the void, so on this handshake the shell re-posts its selected tab
+     * (idempotent on the JS side).
+     */
+    const val TABS_READY_MESSAGE_TYPE = "tabsReady"
 
     /** The `navigate` destination for the native Host Settings screen. */
     const val SETTINGS_DESTINATION = "settings"

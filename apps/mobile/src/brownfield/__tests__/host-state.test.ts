@@ -119,4 +119,32 @@ describe('host-state', () => {
       state: { angle: 1, velocity: 2 },
     });
   });
+
+  it('an accepted checkpoint updates the in-memory store so same-session reads see it', () => {
+    markBrownfieldHost();
+    hydrateHostSavedState('{"spinner":{"angle":1,"velocity":0}}');
+    // Overwrite an existing slice: a later read must see the NEW value, not the
+    // mount-time snapshot (the host only re-injects on the next surface mount).
+    checkpointHostState('spinner', { angle: 9, velocity: 2 });
+    expect(readHostSavedState('spinner')).toEqual({ angle: 9, velocity: 2 });
+    // A brand-new key becomes readable immediately too.
+    checkpointHostState('nav:/sky', { path: '/sky/deep', savedAt: 1 });
+    expect(readHostSavedState('nav:/sky')).toEqual({ path: '/sky/deep', savedAt: 1 });
+  });
+
+  it('a REFUSED checkpoint does not update the in-memory store', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      markBrownfieldHost();
+      hydrateHostSavedState('{"draft":{"ok":1}}');
+      // Secret-shaped field -> refused; the in-memory value must be untouched.
+      checkpointHostState('draft', { password: 'hunter2' });
+      expect(readHostSavedState('draft')).toEqual({ ok: 1 });
+      // Oversized -> refused; likewise untouched.
+      checkpointHostState('draft', { blob: 'x'.repeat(17 * 1024) });
+      expect(readHostSavedState('draft')).toEqual({ ok: 1 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

@@ -130,5 +130,14 @@ export function checkpointHostState(key: string, state: Record<string, unknown>)
     return;
   }
 
+  // Mirror the accepted value into the in-memory store so same-session reads
+  // (readHostSavedState) see the latest checkpoint. The host re-injects the
+  // whole store as savedStateJson only on the NEXT surface mount, so without
+  // this a mid-session reader (e.g. nav-restore's resolveTabPath consulting a
+  // freshly checkpointed slice) would keep seeing the mount-time snapshot all
+  // session. Only ACCEPTED values (past the secret-name and size gates) are
+  // written; the native post remains the persistence side-channel.
+  savedState[key] = state;
+
   sendToNative({ type: 'saveState', key, state });
 }
