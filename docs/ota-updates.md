@@ -291,14 +291,20 @@ attempt", not "last confirmed update"):
    timestamp -> stale -> gates once; after that a user sees "Updating" at most
    once per 24h window (the next launch or surface mount after the window
    elapses), never on remounts in between.
-3. **Once per JS runtime.** `OtaGate` memoizes its resolution in a module-scoped
-   flag: once the gate resolves `ready`, later surface mounts in the same runtime
-   render children immediately and synchronously -- no async timestamp read, no
-   blank frame, no "Updating" flash. This matters in **brownfield hosts, where
-   every native tab switch tears down and remounts the RN surface** (all mounts
-   share one JS runtime); without the memo each remount would re-run the check
-   and flash "Updating". An OTA reload restarts the runtime (resetting the memo),
-   but the freshly saved timestamp keeps that remount gate-free.
+3. **Once per JS runtime, single-flight.** Gate resolution lives in a
+   module-scoped store, `ota-gate-state.ts` (`OtaGate` consumes it via
+   `useSyncExternalStore`): the whole resolution -- timestamp read, staleness
+   decision, and the attempt itself -- runs behind a single shared promise, so
+   it executes **at most once per runtime** and concurrent mounts join the
+   in-flight resolution instead of racing duplicate reads or attempts. Once
+   resolved `ready`, later surface mounts in the same runtime render children
+   immediately and synchronously -- no async timestamp read, no blank frame, no
+   "Updating" flash. This matters in **brownfield hosts, where every native tab
+   switch tears down and remounts the RN surface** (all mounts share one JS
+   runtime); without the shared store each remount would re-run the check and
+   flash "Updating", and a fast tab switch during the first gate could start
+   two concurrent attempts. An OTA reload restarts the runtime (resetting the
+   store), but the freshly saved timestamp keeps that remount gate-free.
 
 `attempt-ota-update.ts` performs the check/fetch and then calls the reload
 helper. `ota-app-version.ts` exposes the human-readable build identifier for the

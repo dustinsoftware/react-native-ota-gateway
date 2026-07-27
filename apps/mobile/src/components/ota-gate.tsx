@@ -1,22 +1,10 @@
 import * as SplashScreen from 'expo-splash-screen';
 import * as Updates from 'expo-updates';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Spacing } from '@/constants/theme';
-import { attemptOtaUpdate } from '@/utils/attempt-ota-update';
-import { getLastOtaTimestamp, isOtaStale } from '@/utils/ota-timestamp';
-
-type GateStatus = 'loading' | 'ready' | 'checking';
-
-const STALE_DAYS = 1;
-
-// Memoizes gate resolution across surface remounts within one JS runtime. In
-// brownfield hosts every native tab switch tears down and remounts the RN
-// surface (all sharing one runtime); without this, each remount would re-run
-// the check and flash "Updating". An OTA reload restarts the runtime, which
-// naturally resets this back to false.
-let resolvedThisRuntime = false;
+import { getGateStatus, resolveGateOnce, subscribeGate } from '@/utils/ota-gate-state';
 
 /**
  * Blocks app rendering while it checks for an OTA update iff the last OTA
@@ -25,10 +13,15 @@ let resolvedThisRuntime = false;
  * blocks at most once per 24h window and there is no embedded-launch special
  * case.
  *
- * Resolution is memoized once per JS runtime: after the gate reaches 'ready',
- * later surface mounts in the same runtime render children immediately and
- * synchronously -- no async timestamp read, no blank frame, no "Updating"
- * flash on brownfield tab switches.
+ * Resolution lives in a module-scoped single-flight store (see
+ * `utils/ota-gate-state.ts`) shared by every mount in the JS runtime: the
+ * gate resolves at most once per runtime, concurrent mounts join the same
+ * attempt instead of starting duplicates, and once resolved every later
+ * surface mount renders children immediately and synchronously -- no async
+ * timestamp read, no blank frame, no "Updating" flash on brownfield tab
+ * switches. `useSyncExternalStore` re-reads the snapshot on subscribe, so a
+ * mount can never miss a resolution that lands between its render and its
+ * effects.
  *
  * If the update check FAILS (offline, server error), the gate falls through to
  * render the embedded bundle -- it is a complete, runnable app -- rather than
@@ -37,50 +30,15 @@ let resolvedThisRuntime = false;
 export function OtaGate({ children }: { children: React.ReactNode }) {
   const isNative = Platform.OS !== 'web' && !__DEV__ && Updates.isEnabled;
 
-  // Start 'ready' on web, or when this runtime already resolved the gate (a
-  // brownfield remount) -- no async read, no "Updating" flash. Otherwise start
-  // 'loading' on native to read the timestamp asynchronously.
-  const [status, setStatus] = useState<GateStatus>(
-    !isNative || resolvedThisRuntime ? 'ready' : 'loading',
-  );
-  const attemptingRef = useRef(false);
-
-  const runUpdate = useCallback(async () => {
-    if (attemptingRef.current) return;
-    attemptingRef.current = true;
-    setStatus('checking');
-
-    const result = await attemptOtaUpdate();
-    attemptingRef.current = false;
-
-    // 'no-update' -> ready. 'error' -> ready anyway: the embedded bundle is
-    // runnable, so a failed check must never block app entry (offline first
-    // launch would otherwise brick). 'reloading' -> standalone reloadAsync()
-    // never returns; in a brownfield host reloadApp() posts a message and the
-    // native host rebuilds the RN root (so this code keeps running briefly).
-    if (result.outcome === 'error') {
-      console.warn('[OTA] update check failed; continuing with current bundle:', result.message);
-    }
-    resolvedThisRuntime = true;
-    setStatus('ready');
-  }, []);
+  const gateStatus = useSyncExternalStore(subscribeGate, getGateStatus);
+  // Web / dev / updates-disabled never gates.
+  const status = isNative ? gateStatus : 'ready';
 
   useEffect(() => {
-    if (!isNative || resolvedThisRuntime) return;
-
-    async function init() {
-      // Gate iff the last OTA attempt is missing or >24h old.
-      const timestamp = await getLastOtaTimestamp();
-      if (isOtaStale(timestamp, STALE_DAYS)) {
-        runUpdate();
-      } else {
-        resolvedThisRuntime = true;
-        setStatus('ready');
-      }
+    if (isNative) {
+      resolveGateOnce();
     }
-
-    init();
-  }, [isNative, runUpdate]);
+  }, [isNative]);
 
   // Hide the native splash once our UI (gate or app) is laid out.
   const splashHidden = useRef(false);
