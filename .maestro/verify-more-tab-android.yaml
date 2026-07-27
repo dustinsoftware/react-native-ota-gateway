@@ -2,7 +2,8 @@
 # native menu -> pushed RN screens (Test 1/2) with the native toolbar/back
 # pattern, RN-internal navigation popping before the native screen closes,
 # the DOUBLE-VISIT back regression (a second visit's Back must still work --
-# the upstream brownfield callback leak class), and the native Test 3 screen
+# pins the package patch for the upstream brownfield callback leak, see
+# docs/brownfield.md), and the native Test 3 screen
 # pushing an RN screen on top.
 #
 # Preconditions: emulator running with `adb reverse` for :3000/:3001, gateway

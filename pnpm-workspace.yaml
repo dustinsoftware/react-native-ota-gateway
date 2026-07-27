@@ -13,3 +13,6 @@ onlyBuiltDependencies:
   - esbuild
   - protobufjs
   - unrs-resolver
+
+patchedDependencies:
+  '@callstack/react-native-brownfield@3.6.1': patches/@callstack__react-native-brownfield@3.6.1.patch

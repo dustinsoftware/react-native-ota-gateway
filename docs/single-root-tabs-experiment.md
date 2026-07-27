@@ -47,11 +47,15 @@ The failure modes that forced the current teardown/remount design (see
 - **`freshRouteContext` route bleed.** The bleed happens when a *new* surface
   mounts and expo-router's module-global store restores the previous
   surface's route. With no remount there is no second mount to bleed into.
-- **Android back-callback leak.** Callstack's `ReactNativeFragment.createView`
-  leaks Activity-scoped back callbacks when fragments are *replaced* inside a
-  shared activity. Here the fragment is never replaced, so the leak cannot
-  manifest. Android would also stop recreating `RNHostActivity` per tab
-  switch.
+- **Android back-callback leak.** Upstream, Callstack's
+  `ReactNativeFragment.createView` leaked Activity-scoped back callbacks when
+  fragments were *replaced* inside a shared activity. This is now fixed by a
+  pnpm package patch
+  (`patches/@callstack__react-native-brownfield@3.6.1.patch`) that scopes the
+  callback to the fragment's lifecycle -- so neither the always-mounted
+  persistent root nor a More-tab detach/remount cycle (Open Problem 1,
+  option A) can accumulate callbacks. Android would also stop recreating
+  `RNHostActivity` per tab switch.
 
 ## Open problems (the wrinkles)
 
@@ -61,7 +65,10 @@ The failure modes that forced the current teardown/remount design (see
    roots are live at once -- the explicitly forbidden case. Options:
    - Detach/tear down the shell surface while More is selected. This
      reintroduces the flash on More <-> RN-tab transitions (but keeps it off
-     the common Developer/Sky/Spinner path).
+     the common Developer/Sky/Spinner path). Each More -> RN-tab round trip
+     remounts a fragment in the same long-lived Activity; safe on the
+     back-callback front only because of the package patch above, and it
+     re-exposes the `freshRouteContext` remount path.
    - Keep the surface mounted but hidden and re-verify the concurrent-roots
      blank-screen issue extensively. Riskier; the standing rule is "never
      retain concurrent Expo Router roots in this host."

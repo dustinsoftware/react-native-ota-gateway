@@ -29,14 +29,16 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
  * Test 1/2, [NativeTestActivity] for the native Test 3), so while More is
  * selected the only live RN surface is a pushed one.
  *
- * Callstack constraint (load-bearing): the brownfield fragment's createView
+ * Callstack back-callback note: upstream, the brownfield fragment's createView
  * registers an Activity-scoped OnBackPressedCallback with **no fragment
- * lifecycle owner**, so it is never removed when a fragment is detached. If we
- * swapped fragments in place across tab changes the callbacks (and RN roots)
- * would accumulate on the same Activity. Instead a tab change persists the
- * selected route and **relaunches this Activity** ([recreate]); destroying the
- * Activity tears down the old back callback and RN root before the newly
- * selected route mounts in a fresh Activity.
+ * lifecycle owner**, so it would never be removed when a fragment is detached
+ * and callbacks would accumulate if fragments were swapped in place. This repo
+ * patches the package (patches/@callstack__react-native-brownfield@3.6.1.patch,
+ * see docs/brownfield.md) so the callback is scoped to the fragment's
+ * lifecycle and dies with it. The recreate-per-tab model below is retained
+ * regardless: a tab change persists the selected route and **relaunches this
+ * Activity** ([recreate]), so the old RN root and any Activity-scoped state
+ * are torn down before the newly selected route mounts in a fresh Activity.
  *
  * Guards:
  * - Restart loops: the [BottomNavigationView] listener no-ops when the tapped

@@ -45,7 +45,8 @@ whom](#who-talks-to-whom), and the [Mode A / Mode B](#mode-a--mode-b) split.
 
 ```
 react-native-ota-gateway/
-|- pnpm-workspace.yaml        # workspaces apps/*, packages/*; nodeLinker: hoisted (RN autolinking)
+|- pnpm-workspace.yaml        # workspaces apps/*, packages/*; nodeLinker: hoisted (RN autolinking); patchedDependencies
+|- patches/                   # pnpm package patches (brownfield back-callback lifecycle fix)
 |- package.json               # root orchestration scripts (export, server:dev, server:prod, ...)
 |- docker-compose.yml         # standalone gateway containers -- REQUIRED serving for Mode B (dev :3000, prod :3001)
 |- README.md, .gitignore      # ignores generated ios/, android/, dist/, hosts/ios/*.xcodeproj

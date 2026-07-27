@@ -246,13 +246,25 @@ runs every config plugin.
 
 ## Patches and prebuild ordering
 
-`patches/` holds two Android patches (already dependency-free) applied to the
-**generated** `android/` tree via `git apply` by `scripts/prebuild.mjs`. The
-brownfield CLI's internal prebuild does **not** run `scripts/prebuild.mjs`, so it
-skips these patches -- always run `node scripts/prebuild.mjs --android` first,
-and keep any durable gradle change in the config plugin (which the CLI *does*
-run), never in a patch. The CLI only runs its internal prebuild when the platform
-directory is missing.
+Three patch mechanisms, each with a distinct survival property:
+
+- **`apps/mobile/patches/`** holds two Android patches (already
+  dependency-free) applied to the **generated** `android/` tree via `git apply`
+  by `scripts/prebuild.mjs`. The brownfield CLI's internal prebuild does
+  **not** run `scripts/prebuild.mjs`, so it skips these patches -- always run
+  `node scripts/prebuild.mjs --android` first, and keep any durable gradle
+  change in the config plugin (which the CLI *does* run), never in a patch.
+  The CLI only runs its internal prebuild when the platform directory is
+  missing.
+- **Root `patches/`** holds pnpm `patchedDependencies` patches (declared in
+  `pnpm-workspace.yaml`), applied to the package in `node_modules` at install
+  time -- durable across every prebuild, including the CLI's internal one.
+  Currently one: `@callstack__react-native-brownfield@3.6.1.patch` scopes the
+  brownfield back-press callback to the hosting fragment's lifecycle
+  (upstream registers it Activity-scoped with no owner, leaking callbacks
+  when fragments are swapped inside one Activity). The library's Kotlin is
+  compiled from `node_modules` into the published AAR, so the fix ships in
+  every `brownfield publish:android`.
 
 `scripts/prebuild.mjs` also runs `ensureReactNativeResolvable()` before an
 Android prebuild: the `@callstack/react-native-brownfield` Android library reads
@@ -535,13 +547,18 @@ ReactNativeFragment.createReactNativeFragment(
 )
 ```
 
-Callstack's `createView` registers an Activity-scoped Back callback without a
-Fragment lifecycle owner. Replacing several fragments inside one Activity would
-leave callbacks from removed surfaces registered. A tab selection therefore
-persists the route, removes the current fragment, and recreates the Activity.
-The old callback and RN root die with the old Activity before the new route
-mounts. `HostRoutePrefs` restores the selected tab after tab changes, OTA
-relaunch, or process death.
+Upstream, Callstack's `createView` registers an Activity-scoped Back callback
+without a Fragment lifecycle owner; replacing several fragments inside one
+Activity would leave callbacks from removed surfaces registered. This repo
+fixes that with a pnpm package patch
+(`patches/@callstack__react-native-brownfield@3.6.1.patch`, see
+[Patches and prebuild ordering](#patches-and-prebuild-ordering)): the callback
+is registered with the fragment as its lifecycle owner, so the dispatcher
+removes it when the fragment is destroyed. The shell nonetheless keeps the
+recreate-per-tab model: a tab selection persists the route, removes the current
+fragment, and recreates the Activity, so the old RN root and any
+Activity-scoped state die before the new route mounts. `HostRoutePrefs`
+restores the selected tab after tab changes, OTA relaunch, or process death.
 
 ### `HostSettingsActivity.kt`
 
@@ -566,17 +583,21 @@ landed on for pushed RN screens:
 - **Test 3** pushes the fully native `NativeTestActivity` with the same chrome;
   its button pushes RN Test 1 on top (native -> RN mixing on one back stack).
 
-**Per-activity hosting is load-bearing, not just presentation.** Callstack's
-`ReactNativeFragment.createView` registers an Activity-scoped
-`OnBackPressedCallback` with no fragment lifecycle owner. Hosting RN screens as
-fragments swapped inside a SHARED activity therefore leaks callbacks across
-visits -- the second visit's Back goes dead (the product repos shipped a
-package patch for exactly this before rehosting per-activity). A dedicated
-activity per RN surface gives every visit a fresh dispatcher and the leak
-cannot manifest; the double-visit case is pinned by
-`.maestro/verify-more-tab-android.yaml`. If an RN screen is ever
-fragment-hosted in a shared activity again, that upstream bug returns --
-re-apply a package patch or fix it upstream first.
+**The back-callback leak is patched; per-activity hosting is the retained
+pattern.** Upstream, Callstack's `ReactNativeFragment.createView` registers an
+Activity-scoped `OnBackPressedCallback` with no fragment lifecycle owner, so
+hosting RN screens as fragments swapped inside a SHARED activity leaks
+callbacks across visits -- the second visit's Back goes dead (the product
+repos shipped a package patch for exactly this before rehosting
+per-activity). This repo carries the same class of fix as a pnpm package
+patch (`patches/@callstack__react-native-brownfield@3.6.1.patch`): the
+fragment passes itself as the callback's lifecycle owner, so the dispatcher
+removes the callback when the fragment is destroyed. Per-activity hosting is
+kept as the product pattern (fresh dispatcher and chrome per pushed screen),
+and the double-visit case stays pinned by
+`.maestro/verify-more-tab-android.yaml` as a regression guard on the patch.
+The patch is version-keyed to 3.6.1 -- on a brownfield upgrade, re-check
+upstream `createView` (still unowned as of 5.0.0) and re-target the patch.
 
 While More is selected the shell mounts NO RN fragment, so a pushed Test
 screen is the only live RN surface, matching iOS.
@@ -665,9 +686,12 @@ not just physical devices. See [development-workflow.md](./development-workflow.
   mod runs first). Wrong order and our injectors run against files that do not
   exist yet and throw.
 - **Patches vs the CLI's internal prebuild.** The brownfield CLI re-runs prebuild
-  itself and skips `scripts/prebuild.mjs`, so a `patches/` entry would be
-  reverted on every package/publish. Durable gradle changes live in the config
-  plugin; always run `prebuild.mjs` before any manual gradle work.
+  itself and skips `scripts/prebuild.mjs`, so an `apps/mobile/patches/` entry
+  would be reverted on every package/publish. Durable gradle changes live in the
+  config plugin; durable changes to a package's own source live in a pnpm
+  `patchedDependencies` patch (root `patches/`), which is applied at install
+  time and survives every prebuild. Always run `prebuild.mjs` before any manual
+  gradle work.
 - **`react-android` debug/release variant mismatch (host SIGSEGV).** A brownfield
   host debug build must substitute the **release** variant of
   `react-android`/`hermes-android` -- see the `app/build.gradle.kts` REQUIRED

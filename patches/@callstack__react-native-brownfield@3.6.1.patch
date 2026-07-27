@@ -1,0 +1,54 @@
+diff --git a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt
+index 22f3387afab585756017ee5aee7b039939fcdc27..635c737b443c150dabd34c3ba84f7ddace068528 100644
+--- a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt
++++ b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt
+@@ -157,11 +157,13 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
+         }
+     }
+ 
++    @JvmOverloads
+     fun createView(
+         activity: FragmentActivity?,
+         moduleName: String,
+         reactDelegate: ReactDelegateWrapper? = null,
+         launchOptions: Bundle? = null,
++        lifecycleOwner: LifecycleOwner? = null,
+     ): FrameLayout {
+         val reactHost = shared.reactHost
+         val resolvedDelegate =
+@@ -174,8 +176,16 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
+             }
+         }
+ 
+-        // Register back press callback
+-        activity?.onBackPressedDispatcher?.addCallback(backPressedCallback)
++        // Register back press callback, scoped to the surface's lifecycle so the
++        // dispatcher removes it when that lifecycle is destroyed. Without an
++        // owner the callback outlives a detached fragment and leaks on the
++        // Activity's dispatcher (dead Back handling when fragments are swapped
++        // within one Activity). Fragment-hosted views pass the fragment;
++        // standalone views fall back to the Activity itself.
++        val callbackOwner = lifecycleOwner ?: activity
++        if (activity != null && callbackOwner != null) {
++            activity.onBackPressedDispatcher.addCallback(callbackOwner, backPressedCallback)
++        }
+         // invoked on the last RN screen exit
+         resolvedDelegate.setHardwareBackHandler {
+             backPressedCallback.isEnabled = false
+diff --git a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt
+index 5efe9fd9ceaac280cb742b294d9c48bfaa9f3b62..6825bd433b544e660d1ca18d6c4bcd260c7ff811 100644
+--- a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt
++++ b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt
+@@ -54,7 +54,11 @@ class ReactNativeFragment : ReactFragment(), PermissionAwareActivity {
+         return ReactNativeBrownfield.shared.createView(
+             activity,
+             moduleName,
+-            this.reactDelegate as ReactDelegateWrapper
++            this.reactDelegate as ReactDelegateWrapper,
++            // Scope the back callback to this fragment so it is removed from
++            // the Activity's OnBackPressedDispatcher when the fragment is
++            // destroyed, instead of leaking across fragment swaps.
++            lifecycleOwner = this,
+         )
+     }
+ 
