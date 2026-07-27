@@ -50,6 +50,10 @@ import { checkpointHostState, readHostSavedState } from './host-state';
  */
 const NAV_SLICE_PREFIX = 'nav:';
 const NAV_STATE_TTL_MS = 30 * 60 * 1000;
+// Tolerated clock skew for a slice timestamp that reads in the FUTURE. Beyond
+// this, the slice is rejected (see isFreshSlice) so a clock rollback / corrupt
+// store cannot make stale state look permanently fresh.
+const NAV_STATE_CLOCK_SKEW_MS = 60 * 1000;
 
 /** Slice naming the currently selected tab (see the module doc). */
 const ACTIVE_TAB_KEY = NAV_SLICE_PREFIX + 'activeTab';
@@ -142,7 +146,13 @@ interface NavSlice extends Record<string, unknown> {
 /** A slice is usable only if it has a non-empty path and is within the TTL. */
 function isFreshSlice(slice: NavSlice | null): slice is NavSlice {
   if (!slice || typeof slice.path !== 'string' || slice.path.length === 0) return false;
-  if (typeof slice.savedAt !== 'number' || Date.now() - slice.savedAt > NAV_STATE_TTL_MS) {
+  if (typeof slice.savedAt !== 'number') return false;
+  const age = Date.now() - slice.savedAt;
+  // Reject too-old (TTL) AND future timestamps beyond a small skew tolerance.
+  // A future `savedAt` (clock rollback / corrupt store) would otherwise read as
+  // fresh (negative age) AND satisfy the `savedAt > mountedAt` reload override,
+  // letting stale state hijack a legitimately fresh mount indefinitely.
+  if (age > NAV_STATE_TTL_MS || age < -NAV_STATE_CLOCK_SKEW_MS) {
     return false;
   }
   return true;

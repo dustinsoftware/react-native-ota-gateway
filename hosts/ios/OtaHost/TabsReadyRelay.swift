@@ -7,12 +7,17 @@ import Foundation
 /// JS side treats a re-post idempotently, so a spurious notify (e.g. the
 /// surface was mounted directly at the right tab) is a no-op.
 ///
-/// The bridge callback may fire off the main thread; the registered listener
-/// is responsible for hopping to the main queue.
+/// The bridge callback may fire off the main thread. `notify()` therefore
+/// hops to the main queue before reading/invoking the listener, and the
+/// listener is only ever assigned on the main thread (in `viewDidLoad`), so
+/// access to the shared `listener` is confined to the main queue -- no data
+/// race, and the registered closure runs on the main thread.
 enum TabsReadyRelay {
     static var listener: (() -> Void)?
 
     static func notify() {
-        listener?()
+        DispatchQueue.main.async {
+            listener?()
+        }
     }
 }

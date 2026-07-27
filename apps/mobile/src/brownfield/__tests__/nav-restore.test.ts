@@ -71,6 +71,31 @@ describe('nav-restore', () => {
     expect(resolveInitialLocation('/developer')).toBe('/developer');
   });
 
+  it('rejects a FUTURE slice beyond the clock-skew tolerance (clock rollback)', () => {
+    configureNavRestore('/developer', true);
+    // savedAt far in the future: a naive `Date.now() - savedAt > TTL` check
+    // would read this as fresh (negative age). It must be rejected instead.
+    hydrateNavSlice('/developer', { path: '/developer/detail', savedAt: NOW + 5 * 60 * 1000 });
+    expect(resolveInitialLocation('/developer')).toBe('/developer');
+  });
+
+  it('still accepts a slightly-future slice within the skew tolerance', () => {
+    configureNavRestore('/developer', true);
+    hydrateNavSlice('/developer', { path: '/developer/detail', savedAt: NOW + 5 * 1000 });
+    expect(resolveInitialLocation('/developer')).toBe('/developer/detail');
+  });
+
+  it('a FUTURE activeTab slice cannot hijack the mount (reload override rejected)', () => {
+    configureNavRestore('/developer', true);
+    // A future activeTab would otherwise pass BOTH the freshness check and the
+    // `savedAt > mountedAt` reload-override gate, hijacking a fresh mount.
+    hydrateSlices({
+      activeTab: { path: '/spinner', savedAt: NOW + 10 * 60 * 1000 },
+      '/spinner': { path: '/spinner', savedAt: NOW + 10 * 60 * 1000 },
+    });
+    expect(resolveInitialLocation('/developer', STALE_PROPS_MOUNTED_AT)).toBe('/developer');
+  });
+
   it.each([
     ['missing path', { savedAt: 1 }],
     ['empty path', { path: '', savedAt: 1 }],

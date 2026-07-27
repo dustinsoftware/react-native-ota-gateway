@@ -58,20 +58,28 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
 
         setupTabBar()
         setupContentContainer()
-        selectTab(selectedTab, persist: false)
 
-        // JS announces its selectTab listener is live. Re-post the selected
-        // tab: a tap in the window after the event emitter wired up but
-        // before that listener subscribed was emitted into the void, which
-        // would strand the shell on the mount-time route. Idempotent JS-side.
+        // Register the tabsReady relay BEFORE mounting the initial surface, so a
+        // handshake posted as JS boots can never arrive before the listener
+        // exists. `notify()` marshals to the main queue, so this runs on main.
+        //
+        // JS announces its selectTab listener is live; re-post the selected
+        // tab: a tap in the window after the event emitter wired up but before
+        // that listener subscribed was emitted into the void, which would
+        // strand the shell on the mount-time route. Idempotent JS-side. Guarded
+        // on a live RN surface AND no restart in flight -- mirroring the soft
+        // `selectTab` path -- so we never post to a stopped/rebuilding runtime
+        // (the selection is materialized by `rebuildActiveSurface` instead).
         TabsReadyRelay.listener = { [weak self] in
-            DispatchQueue.main.async {
-                guard let self, self.hasMountedReactSurface,
-                      let route = self.selectedTab.route
-                else { return }
-                self.postSelectTab(route: route)
-            }
+            guard let self,
+                  self.hasMountedReactSurface,
+                  !BrownfieldReloader.shared.isRestartInFlight,
+                  let route = self.selectedTab.route
+            else { return }
+            self.postSelectTab(route: route)
         }
+
+        selectTab(selectedTab, persist: false)
     }
 
     // MARK: - BrownfieldReloadHost

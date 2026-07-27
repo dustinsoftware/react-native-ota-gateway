@@ -7,6 +7,7 @@ import {
   type NavStateNode,
   applySelectTab,
   findTabsStateKey,
+  isKnownTabRoute,
   isNavRestoreEnabled,
   tabForPath,
 } from '@/brownfield/nav-restore';
@@ -71,23 +72,37 @@ import { isBrownfieldHost } from '@/brownfield/runtime';
  * dispatch. While a request is pending we POLL on a real delay (a state commit
  * does not by itself re-render this component), re-dispatching the targeted
  * JUMP_TO until the observed pathname's owning tab matches the request, then
- * stop. A bounded deadline guarantees the poll always terminates; last request
- * wins.
+ * stop. The dispatch deadline is measured from WHEN THE TABS NAVIGATOR BECAME
+ * AVAILABLE, not from when the message arrived: the navigator can be withheld
+ * for seconds while the OTA gate blocks children, and that wait must not eat
+ * the dispatch budget (a generous absolute cap still guarantees termination).
+ * Last request wins.
  */
 
 /** How often the pending-request poll re-checks / re-dispatches. */
 const SELECT_TAB_POLL_MS = 120;
-/** Overall budget for a single request before the poll gives up. */
+/** Budget for landing AFTER the tabs navigator becomes available. */
 const SELECT_TAB_DEADLINE_MS = 4000;
+/**
+ * Absolute cap from message arrival, covering the pre-mount wait (e.g. the OTA
+ * gate withholding the navigator). Generous vs. the OTA check timeout (~10s) so
+ * a tab tapped during the gate is still honored once the navigator mounts;
+ * guarantees the poll terminates even if the navigator never mounts.
+ */
+const SELECT_TAB_ABSOLUTE_MS = 30000;
 
 export function TabSelectGuard() {
   const navigationRef = useNavigationContainerRef();
   const pathname = usePathname();
 
   const [pending, setPending] = useState<string | null>(null);
-  // Wall-clock instant the current request arrived; bounds the poll so a truly
-  // undeliverable request cannot loop forever. Null when idle.
+  // Wall-clock instant the current request arrived; bounds the absolute wait so
+  // a truly undeliverable request cannot loop forever. Null when idle.
   const pendingSinceRef = useRef<number | null>(null);
+  // Wall-clock instant the tabs navigator first became resolvable for the
+  // current request; the dispatch deadline is measured from here so the
+  // pre-mount wait (OTA gate) is not counted against it. Null until resolvable.
+  const keyReadySinceRef = useRef<number | null>(null);
   // Bumped by the poll timeout to force a verification render even when no
   // navigation commit (and thus no pathname change) occurs on its own.
   const [verifyTick, setVerifyTick] = useState(0);
@@ -95,6 +110,7 @@ export function TabSelectGuard() {
   useNativeMessages((message) => {
     if (message.type !== 'selectTab') return;
     pendingSinceRef.current = Date.now();
+    keyReadySinceRef.current = null;
     setPending(message.route);
   });
 
@@ -111,44 +127,72 @@ export function TabSelectGuard() {
   useEffect(() => {
     if (pending === null) return;
 
+    // Unknown route (untrusted bridge input / a newer host's tab an older
+    // bundle predates -- the version-skew guarantee): drop it immediately
+    // rather than poll for it. Checked BEFORE the no-key wait below, so an
+    // unknown route received during the OTA gate does not linger for the
+    // absolute cap.
+    if (!isKnownTabRoute(pending)) {
+      setPending(null);
+      pendingSinceRef.current = null;
+      keyReadySinceRef.current = null;
+      return;
+    }
+
     // Landed on the requested tab -> done.
     if (tabForPath(pathname) === pending) {
       setPending(null);
       pendingSinceRef.current = null;
+      keyReadySinceRef.current = null;
       return;
     }
 
-    // Bounded: give up rather than poll forever -- covers a request that never
-    // lands (e.g. the tabs navigator never mounts, or an unknown route slips in
-    // before a landing check). Keeps the poll from looping indefinitely.
-    const since = pendingSinceRef.current ?? Date.now();
-    if (Date.now() - since > SELECT_TAB_DEADLINE_MS) {
+    // Resolve the live tabs navigator key -- our readiness AND target signal.
+    // Derived from getRootState(), NOT navigationRef.isReady(): in the
+    // brownfield single-root host isReady() can read false even though the
+    // router store is fully functional (usePathname resolves, getRootState
+    // returns the tree). Gating dispatch on isReady() strands every switch.
+    let rootState: NavStateNode | undefined;
+    try {
+      rootState = navigationRef?.getRootState?.() as NavStateNode | undefined;
+    } catch {
+      rootState = undefined;
+    }
+    const targetKey = findTabsStateKey(rootState);
+
+    // Phase 1 -- tabs navigator not mounted yet (e.g. the OTA gate still
+    // withholds children). Keep the request ALIVE without counting it against
+    // the dispatch deadline, bounded only by a generous absolute cap so a
+    // navigator that never mounts cannot loop forever.
+    if (!targetKey) {
+      keyReadySinceRef.current = null;
+      const since = pendingSinceRef.current ?? Date.now();
+      if (Date.now() - since > SELECT_TAB_ABSOLUTE_MS) {
+        setPending(null);
+        pendingSinceRef.current = null;
+        return;
+      }
+      const pollId = setTimeout(() => setVerifyTick((tick) => tick + 1), SELECT_TAB_POLL_MS);
+      return () => clearTimeout(pollId);
+    }
+
+    // Phase 2 -- the tabs navigator is available. Bound the dispatch attempts
+    // by a deadline measured from WHEN THE KEY BECAME AVAILABLE, so the
+    // pre-mount wait never eats the dispatch budget.
+    const readySince = keyReadySinceRef.current ?? Date.now();
+    keyReadySinceRef.current = readySince;
+    if (Date.now() - readySince > SELECT_TAB_DEADLINE_MS) {
       setPending(null);
       pendingSinceRef.current = null;
+      keyReadySinceRef.current = null;
       return;
     }
-
-    // Readiness is derived from the tabs navigator being resolvable (below),
-    // NOT from navigationRef.isReady(): in the brownfield single-root host
-    // isReady() can read false even though the router store is fully functional
-    // (usePathname resolves, getRootState returns the tree). Gating dispatch on
-    // isReady() there strands every tab switch. A targeted JUMP_TO only needs
-    // the live tabs navigator key, which findTabsStateKey provides.
 
     // Reveal the tab via a TARGETED JUMP_TO on the tabs navigator (mirrors a
     // native tab press). applySelectTab validates the route (skew guarantee);
     // an unknown route drives nothing, so stop immediately.
     const drove = applySelectTab(pending, (path) => {
       const tab = tabForPath(path) ?? pending;
-      let rootState: NavStateNode | undefined;
-      try {
-        rootState = navigationRef?.getRootState?.() as NavStateNode | undefined;
-      } catch {
-        rootState = undefined;
-      }
-      const targetKey = findTabsStateKey(rootState);
-      // Key not resolvable yet -> treat as not-ready; the poll retries.
-      if (!targetKey) return;
       navigationRef?.dispatch?.({
         ...TabActions.jumpTo(tab.slice(1)),
         target: targetKey,
@@ -157,6 +201,7 @@ export function TabSelectGuard() {
     if (!drove) {
       setPending(null);
       pendingSinceRef.current = null;
+      keyReadySinceRef.current = null;
       return;
     }
 

@@ -30,7 +30,11 @@ import { getGateStatus, resolveGateOnce, subscribeGate } from '@/utils/ota-gate-
 export function OtaGate({ children }: { children: React.ReactNode }) {
   const isNative = Platform.OS !== 'web' && !__DEV__ && Updates.isEnabled;
 
-  const gateStatus = useSyncExternalStore(subscribeGate, getGateStatus);
+  // Third arg (getServerSnapshot) is required: web builds use expo-router's
+  // `output: "server"`, so this component is server-rendered and React throws
+  // without it. getGateStatus reads only module state, so it is server-safe;
+  // web maps to 'ready' below regardless, so client hydration always matches.
+  const gateStatus = useSyncExternalStore(subscribeGate, getGateStatus, getGateStatus);
   // Web / dev / updates-disabled never gates.
   const status = isNative ? gateStatus : 'ready';
 
