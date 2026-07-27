@@ -26,6 +26,10 @@ enum Brownfield {
     static let saveStateMessageType = "saveState"
     /// Message `type` the JS side posts to navigate INTO a native screen.
     static let navigateMessageType = "navigate"
+    /// Message `type` the host posts to the persistent RN surface to switch
+    /// the active tab route WITHOUT a remount. The JS listener responds with
+    /// `router.replace(route)`. Payload: `{ "type": "selectTab", "route": <path> }`.
+    static let selectTabMessageType = "selectTab"
     /// The `navigate` destination for the native Host Settings screen.
     static let settingsDestination = "settings"
     /// Key of the initial property carrying the persisted component-state

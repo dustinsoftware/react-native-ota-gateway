@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { NavStateGuard } from '@/components/nav-state-guard';
 import { OtaGate } from '@/components/ota-gate';
+import { TabSelectGuard } from '@/components/tab-select-guard';
 import { Colors } from '@/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -31,6 +32,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.dark.background }}>
       <OtaGate>
         <NavStateGuard />
+        <TabSelectGuard />
         <Stack screenOptions={{ headerShown: false }} />
       </OtaGate>
     </GestureHandlerRootView>

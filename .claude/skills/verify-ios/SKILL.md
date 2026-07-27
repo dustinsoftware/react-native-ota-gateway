@@ -167,9 +167,12 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
 - A stray Metro on `:8081` from another checkout feeds the wrong bundle -- check
   `lsof` first.
 - Relaunching between v1 capture and Restart silently self-applies the update.
-- Cycle Developer -> Sky -> Spinner -> Developer repeatedly. The shell mounts
-  one RN surface at a time, but a historical later-mount blank is still tracked
-  in `docs/brownfield.md`; do not consider the tab flow verified if any route is
+- Cycle Developer -> Sky -> Spinner -> Developer repeatedly. RN-tab -> RN-tab
+  switches drive one persistent RN surface over a `selectTab` bridge message
+  (no remount, no flash -- single-root design; see
+  `docs/single-root-tabs-experiment.md`); More <-> RN-tab and OTA reloads still
+  mount fresh. A historical later-mount blank is still tracked in
+  `docs/brownfield.md`; do not consider the tab flow verified if any route is
   blank or restores the previous route.
 - `simctl install booted` fails if no simulator is booted -- boot one first
   (`xcrun simctl boot ...; open -a Simulator`).

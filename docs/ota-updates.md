@@ -299,10 +299,12 @@ attempt", not "last confirmed update"):
    in-flight resolution instead of racing duplicate reads or attempts. Once
    resolved `ready`, later surface mounts in the same runtime render children
    immediately and synchronously -- no async timestamp read, no blank frame, no
-   "Updating" flash. This matters in **brownfield hosts, where every native tab
-   switch tears down and remounts the RN surface** (all mounts share one JS
-   runtime); without the shared store each remount would re-run the check and
-   flash "Updating", and a fast tab switch during the first gate could start
+   "Updating" flash. This matters in **brownfield hosts, where surface mounts
+   still recur** -- More <-> RN-tab returns, pushed Test screens, and OTA
+   reloads all mount an RN surface (all mounts share one JS runtime; RN-tab ->
+   RN-tab switches no longer remount under the single-root design, but the other
+   paths do). Without the shared store each remount would re-run the check and
+   flash "Updating", and a fast surface mount during the first gate could start
    two concurrent attempts. An OTA reload restarts the runtime (resetting the
    store), but the freshly saved timestamp keeps that remount gate-free.
 

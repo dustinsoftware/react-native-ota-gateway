@@ -41,6 +41,13 @@ object Brownfield {
     /** Message `type` for RN -> native navigation (shared contract with iOS). */
     const val NAVIGATE_MESSAGE_TYPE = "navigate"
 
+    /**
+     * Message `type` the host posts NATIVE -> RN to switch the persistent tab
+     * surface's route without remounting (shared contract with iOS and the JS
+     * selectTab listener).
+     */
+    const val SELECT_TAB_MESSAGE_TYPE = "selectTab"
+
     /** The `navigate` destination for the native Host Settings screen. */
     const val SETTINGS_DESTINATION = "settings"
 }

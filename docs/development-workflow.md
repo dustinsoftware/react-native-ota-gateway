@@ -304,11 +304,14 @@ Each implementation phase is traceable to a doc section; verify against it.
 | OTA delivery proof | The marker-bump procedure above, on both platforms. |
 
 For both native hosts, also cycle Developer -> Sky -> Spinner -> Developer and
-confirm each selection replaces the one RN surface with the correct route, the
-RN tab bar stays hidden, no previous route bleeds through, and no surface is
-blank. Android tab changes recreate the host Activity by design; verify Back is
-handled by the visible route and use "Don't keep activities" to exercise
-restoration without duplicate fragments.
+confirm each selection shows the correct route with no flash, the RN tab bar
+stays hidden, no previous route bleeds through, and no surface is blank. These
+RN-tab -> RN-tab switches drive the persistent RN surface over the `selectTab`
+bridge message (they do NOT recreate the Activity / remount the surface -- see
+[single-root-tabs-experiment.md](./single-root-tabs-experiment.md)); only
+More <-> RN-tab and OTA reloads rebuild the surface. Verify Back is handled by
+the visible route, and use "Don't keep activities" (Android) to exercise
+process-death restoration without duplicate fragments.
 
 ## Related docs
 

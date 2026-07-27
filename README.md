@@ -43,7 +43,9 @@ targets from the same source:
 Two minimal native host apps (`hosts/ios`, `hosts/android`) embed the brownfield
 artifacts and own a four-item native tab bar (Developer, Sky, Spinner, More).
 Each host keeps at most one RN surface mounted at a time and passes the selected
-route as `initialUrl`, demonstrating that the host owns navigation state. The
+route as `initialUrl`, demonstrating that the host owns navigation state. The RN
+tabs share one persistent surface -- an RN-tab -> RN-tab tap swaps the route
+over a `selectTab` bridge message rather than remounting. The
 More tab is fully native: a Test menu whose rows push RN and native screens on
 one back stack (the mix-and-match demo). Components can opt into HOST-side
 state persistence -- the fidget spinner keeps coasting across tab switches and

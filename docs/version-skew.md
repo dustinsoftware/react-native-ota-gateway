@@ -76,6 +76,12 @@ Skew-tolerance already exists at the message bridge, by convention:
 - Native -> RN messages cross a Zod boundary (schema in
   `src/brownfield/message-bridge.types.ts`, enforced by the `safeParse` guard
   in `message-bridge.native.ts`); invalid shapes are dropped.
+- The `selectTab` message deliberately validates the SET of known tab routes in
+  the *handler* (`applySelectTab` / `KNOWN_TAB_ROUTES` in
+  `src/brownfield/nav-restore.ts`), not the schema: `route` is a bare string in
+  the Zod schema, so a newer host can add a tab route without breaking an older
+  bundle, and an older host posting a route a newer bundle dropped is simply
+  ignored. Unknown/malformed routes fall through silently.
 - Saved-state slices are dropped, never propagated, when malformed
   (`HostStateStore.kt` / `HostStateStore.swift` readers, and
   `hydrateHostSavedState` on the JS side).

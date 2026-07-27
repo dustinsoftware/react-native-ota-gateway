@@ -30,9 +30,22 @@ export const configSchema = z.object({
   payload: z.record(z.string(), z.unknown()),
 });
 
+// Selects one of the shell's persistent-root tabs. Under the single-root
+// design (docs/single-root-tabs-experiment.md) the host does NOT remount an
+// RN surface per tab tap: it posts this message and the RN app drives the tab
+// change in place (see src/components/tab-select-guard.tsx). `route` stays a
+// bare string here on purpose -- the bridge is untrusted input, so the SET of
+// known tab routes is validated in the handler, not the schema; an unknown or
+// malformed route is silently ignored (the documented skew guarantee).
+export const selectTabSchema = z.object({
+  type: z.literal('selectTab'),
+  route: z.string(),
+});
+
 export const nativeToRNSchema = z.discriminatedUnion('type', [
   featureFlagSchema,
   configSchema,
+  selectTabSchema,
 ]);
 
 export type NativeToRNMessage = z.infer<typeof nativeToRNSchema>;

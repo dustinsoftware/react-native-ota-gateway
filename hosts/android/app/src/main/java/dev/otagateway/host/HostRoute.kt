@@ -24,14 +24,15 @@ enum class HostRoute(val path: String?) {
 }
 
 /**
- * Persists the selected native tab/route across the Activity relaunches the
- * host uses to switch tabs.
+ * Persists the selected native tab/route so the host restores the same tab
+ * across a recreation, an OTA relaunch, and process death.
  *
- * Tab switching relaunches [RNHostActivity] rather than swapping fragments in
- * place (see the class doc for why), so the selected route must survive that
- * relaunch. It also survives an OTA relaunch and process death, so the host
- * restores the same tab the user was on. Stored by enum name (not RN path;
- * the native More tab has none); unknown values fall back to [HostRoute.DEFAULT].
+ * RN tab -> RN tab changes now keep the persistent RN root mounted (see
+ * [RNHostActivity]) rather than relaunching the Activity, but the selected
+ * route is still persisted on every tab change so onCreate can re-mount the
+ * correct surface after a config change, OTA relaunch, or process death.
+ * Stored by enum name (not RN path; the native More tab has none); unknown
+ * values fall back to [HostRoute.DEFAULT].
  */
 object HostRoutePrefs {
     private const val NAME = "dev.otagateway.host.route"

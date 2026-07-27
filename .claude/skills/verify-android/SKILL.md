@@ -152,10 +152,13 @@ curl -sD - -o /dev/null http://localhost:3001/api/v2/updates/manifest \
   across reinstalls; uninstall to reset.
 - A stray Metro on `:8081` from another checkout feeds the wrong bundle.
 - Relaunching between v1 capture and Restart silently self-applies the update.
-- Cycle Developer -> Sky -> Spinner -> Developer. Each tap recreates the host
-  Activity intentionally so Callstack's Activity-scoped Back callback and the
-  prior RN root are destroyed. Confirm the selected route renders, the RN tab
-  bar stays hidden, and hardware Back never targets a previous tab.
+- Cycle Developer -> Sky -> Spinner -> Developer. Each RN-tab -> RN-tab tap
+  drives the persistent RN surface over a `selectTab` bridge message -- it does
+  NOT recreate the host Activity or remount the surface (single-root design; see
+  `docs/single-root-tabs-experiment.md`). Confirm the selected route renders
+  with no flash, the RN tab bar stays hidden, and hardware Back never targets a
+  previous tab. Selecting More (or an OTA reload) still tears the RN surface
+  down; the Callstack back-callback patch keeps those remounts leak-free.
 
 ## Related
 

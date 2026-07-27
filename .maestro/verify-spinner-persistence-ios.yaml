@@ -1,9 +1,14 @@
 # Verifies the host-state persistence seam on iOS: spin the fidget spinner,
-# switch native tabs (which deallocates the RN surface), come back -- the
-# spinner must STILL be coasting, resumed from the state checkpointed into
-# UserDefaults over the brownfield message bridge. Then the harder variant:
-# kill the app and relaunch -- the persisted tab restores Spinner and the
-# coast resumes across process death.
+# switch native tabs and come back -- the spinner must STILL be coasting,
+# resumed from the state checkpointed into UserDefaults over the brownfield
+# message bridge. Under the single persistent RN root
+# (docs/single-root-tabs-experiment.md) an RN tab -> RN tab switch no longer
+# deallocates the RN surface; it is a soft `selectTab` route swap, and
+# expo-router's replace unmounts/remounts the spinner SCREEN while the runtime
+# stays live. Either way the coast is frozen at its last checkpoint while the
+# screen is off and resumes from the saved slice on return. Then the harder
+# variant: kill the app and relaunch (a real teardown+remount) -- the
+# persisted tab restores Spinner and the coast resumes across process death.
 #
 # Timing note: friction is near-zero (velocity halves roughly every 70s while
 # visible, and is frozen while dismissed), so none of these steps race the
@@ -54,8 +59,10 @@ appId: dev.otagateway.host
     visible: "spinning"
     timeout: 5000
 
-# Tab roundtrip: Sky deallocates the spinner surface; returning must resume
-# the coast from the native store.
+# Tab roundtrip on the live root: switching to Sky is a soft route swap (no
+# surface deallocation). expo-router's replace unmounts the spinner screen, so
+# the coast freezes at its last checkpoint; returning remounts the screen,
+# which resumes the coast from the native store.
 - tapOn:
     id: "tab-sky"
 - tapOn:

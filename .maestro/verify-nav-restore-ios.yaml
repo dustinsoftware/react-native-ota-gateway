@@ -1,8 +1,12 @@
 # Verifies per-tab navigation restoration (nav-restore seam) on iOS: a tab
-# surface that opted into restoreNavState resumes its last IN-SURFACE path
-# after the tab roundtrip tears the surface down (surface deallocation), instead
-# of resetting to the tab's initialUrl. Ends by navigating back to the tab
-# root so the persisted path is clean for other flows.
+# that opted into restoreNavState resumes its last IN-SURFACE path after
+# switching away and back, instead of resetting to the tab's initialUrl. Under
+# the single persistent RN root (docs/single-root-tabs-experiment.md) an
+# RN tab -> RN tab switch does NOT deallocate the surface: the host posts a
+# `selectTab` bridge message and JS swaps the route in place via
+# router.replace, resolving the target through the saved per-tab nav slice
+# (resolveTabPath in src/brownfield/nav-restore.ts). Ends by navigating back
+# to the tab root so the persisted path is clean for other flows.
 # NOTE: no self-warm cycle -- run after any warming flow when a fresh export
 # was just deployed in Mode B.
 appId: dev.otagateway.host
@@ -33,8 +37,9 @@ appId: dev.otagateway.host
       id: "test-one-screen"
     timeout: 15000
 
-# Tab roundtrip: Sky tears the surface down; returning must resume Test 1,
-# NOT reset to /developer.
+# Tab roundtrip on the live root: switching to Sky is a soft route swap (no
+# surface deallocation); returning to Developer must resolve the saved slice
+# and resume Test 1 via router.replace, NOT reset to /developer.
 - tapOn:
     id: "tab-sky"
 - tapOn:

@@ -99,8 +99,11 @@ serve all of them.
   `OtaGatewayApp` and renders any route by passing an `initialUrl` prop. The
   demo hosts own a four-item native tab bar (Developer, Sky, Spinner, More) and
   mount at most one RN surface at a time (the native More tab mounts none; its
-  Test rows push RN/native screens instead). Selecting a native tab replaces that
-  surface with the selected route while the shared RN runtime stays initialized.
+  Test rows push RN/native screens instead). The RN Developer/Sky/Spinner tabs
+  share ONE persistent RN surface: an RN-tab -> RN-tab tap posts a `selectTab`
+  bridge message and the RN app swaps the route in place (no remount, no flash);
+  only More <-> RN-tab and OTA reloads tear the surface down and rebuild it. The
+  shared RN runtime stays initialized throughout.
 
 The brownfield entry (`src/brownfield/entry.tsx`) is an *addition*: it registers
 `OtaGatewayApp` for the native host while `registerRootComponent` still registers
@@ -137,15 +140,18 @@ change only (pass a different URL); no RN code changes.
 ```
 
 The native tab selection is the navigation state being demonstrated. The RN
-tab bar is hidden in brownfield mode, and the host passes `/developer`, `/sky`,
-or `/spinner` when it creates the one active surface. Route-local RN state is
-discarded on a native tab change unless a component opts into the host-state
-seam, which round-trips its state through the host's native store (the fidget
-spinner's coast and the Test 1 counter survive tab changes and process death;
-see [brownfield.md](./brownfield.md)). RN screens can also navigate INTO
-native screens over the message bridge (the navigate seam, same doc).
-Host-only environment, Metro, and relaunch controls live behind the Developer
-tab's native Settings action.
+tab bar is hidden in brownfield mode; the host mounts the one active surface
+with `/developer`, `/sky`, or `/spinner`, then drives later RN-tab -> RN-tab
+changes over the `selectTab` bridge message (single-root design; see
+[single-root-tabs-experiment.md](./single-root-tabs-experiment.md)).
+Route-local RN state does not survive an RN-tab -> RN-tab route swap (the old
+screen unmounts) or a More <-> RN-tab teardown unless a component opts into the
+host-state seam, which round-trips its state through the host's native store
+(the fidget spinner's coast and the Test 1 counter survive tab changes and
+process death; see [brownfield.md](./brownfield.md)). RN screens can also
+navigate INTO native screens over the message bridge (the navigate seam, same
+doc). Host-only environment, Metro, and relaunch controls live behind the
+Developer tab's native Settings action.
 
 Both server instances read the **same** `dist/` export. The only difference is
 `OTA_ENVIRONMENT`, which flips (a) the gateway host stamped into the served

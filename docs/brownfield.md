@@ -336,10 +336,27 @@ message is dropped.
 `HostShellViewController.swift` owns a native `UITabBar` with Developer, Sky,
 and Spinner items plus one content slot. It does **not** use
 `UITabBarController`, because retaining one RN controller per item would create
-multiple simultaneous Expo Router roots in the shared JS runtime. A tab
-selection first removes the current `ReactNativeViewController`, then creates a
-new tracked controller through `BrownfieldReloader` with `/developer`, `/sky`,
-or `/spinner` as `initialUrl`.
+multiple simultaneous Expo Router roots in the shared JS runtime.
+
+The shell keeps **one persistent RN surface** mounted and drives RN-tab ->
+RN-tab changes over the bridge instead of remounting (the single-root design;
+see [single-root-tabs-experiment.md](./single-root-tabs-experiment.md)):
+
+- **RN tab -> RN tab (soft switch).** When the target is an RN tab AND a live
+  RN surface exists (`hasMountedReactSurface`, the live-RN-surface identity
+  flag) AND no restart is in flight (`!BrownfieldReloader.shared.isRestartInFlight`),
+  the shell keeps the surface, updates its native chrome, persists the
+  selection, and posts `{ "type": "selectTab", "route": <path> }` over the
+  bridge (`ReactNativeBrownfield.shared.postMessage`, serialized with
+  `JSONSerialization`). The RN app's `TabSelectGuard` handles it with
+  `router.replace` -- no teardown, no flash.
+- **Hard mount otherwise.** The native More tab tears the RN surface down and
+  embeds `MoreMenuViewController`; a first mount or a return from More mounts a
+  fresh surface through `BrownfieldReloader.makeViewController` with `/developer`,
+  `/sky`, or `/spinner` as `initialUrl` (plus the `savedStateJson` and
+  `restoreNavState` props); and while a restart is in flight the shell only
+  persists the selection -- `rebuildActiveSurface` materializes it once the
+  runtime is back.
 
 The reloader tracks the one live RN controller weakly. On reload it (1) stops
 RN, (2) calls `OtaGatewayLib.relaunchUpdates` -- which runs expo-updates'
@@ -541,13 +558,20 @@ and malformed messages are ignored on both platforms -- the skew guarantee
 ### `RNHostActivity.kt` (launcher and native tab shell)
 
 `RNHostActivity` owns a native Material `BottomNavigationView` with Developer,
-Sky, and Spinner items, a toolbar, and one fragment container. It creates one
-`ReactNativeFragment` with the selected route:
+Sky, and Spinner items, a toolbar (kept as a field), and one fragment
+container. It keeps **one persistent `ReactNativeFragment`** mounted and drives
+RN-tab -> RN-tab changes over the bridge instead of recreating the Activity
+(the single-root design; see
+[single-root-tabs-experiment.md](./single-root-tabs-experiment.md)):
 
 ```kotlin
 ReactNativeFragment.createReactNativeFragment(
     "OtaGatewayApp",
-    bundleOf("initialUrl" to selectedRoute.path),
+    bundleOf(
+        "initialUrl" to path,
+        Brownfield.SAVED_STATE_PROP to HostStateStore.readAllJson(this),
+        Brownfield.RESTORE_NAV_STATE_PROP to true,
+    ),
 )
 ```
 
@@ -559,11 +583,27 @@ fixes that with a pnpm package patch
 [Patches and prebuild ordering](#patches-and-prebuild-ordering)): the callback
 is registered with the fragment as its lifecycle owner AND removed in the
 fragment's `onDestroyView`, so every view creation's callback is gone by the
-time the next one registers. The shell nonetheless keeps the
-recreate-per-tab model: a tab selection persists the route, removes the current
-fragment, and recreates the Activity, so the old RN root and any
-Activity-scoped state die before the new route mounts. `HostRoutePrefs`
-restores the selected tab after tab changes, OTA relaunch, or process death.
+time the next one registers. Because the leak is gone, one fragment can stay
+alive across tab changes. `navigateTo` applies a tab selection as:
+
+- **RN tab -> RN tab:** the fragment is NOT torn down and the Activity is NOT
+  recreated. The shell persists the route (`HostRoutePrefs`), calls
+  `updateToolbarChrome()` (which re-adds the Settings menu item only on
+  Developer), and posts `{ "type": "selectTab", "route": <path> }` via
+  `ReactNativeBrownfield.shared.postMessage` (a `JSONObject`); the RN app swaps
+  the visible route in the one live surface.
+- **RN tab -> More:** `removeMountedFragment()` (a `commitNow` remove) tears the
+  RN surface down and a lazily-built native More menu view is swapped into the
+  container, so while More is selected the only live RN surface is a pushed one.
+- **More -> RN tab:** the menu is removed and a FRESH fragment is mounted with
+  `initialUrl` / `savedStateJson` / `restoreNavState = true`.
+
+`onCreate` still mounts whatever `HostRoutePrefs` records, which covers a fresh
+launch, rotation, process death, and OTA relaunch. There is no in-flight OTA
+flag on Android: the fragment stays mounted across the in-place `ReactHost`
+relaunch (`BrownfieldReloadHandler`), and the tab the user selected is restored
+via the JS `nav:activeTab` slice (see the host-state seam below), not an
+Activity recreation. Back handling is unchanged.
 
 ### `HostSettingsActivity.kt`
 
@@ -648,14 +688,29 @@ both the tab-roundtrip and process-death resumes. The pushed Test 1 screen's
 counter uses the same seam from a pushed surface (reset row included so the
 flows stay idempotent).
 
-**Per-tab navigation restoration** rides the same seam: tab mounts pass
-`restoreNavState: true` (pushed screens deliberately do not), the root
-layout's `NavStateGuard` checkpoints the surface's current path (slice
-`nav:<initialUrl>`, 30-minute TTL), and the brownfield entry mounts at the
-saved path instead of `initialUrl` (`src/brownfield/nav-restore.ts`). This
-softens freshRouteContext's reset-to-initialUrl trade-off for tabs holding
-deep in-surface navigation; only the PATH is restored (expo-router rebuilds
-the stack from the URL). `.maestro/verify-nav-restore-{ios,android}.yaml`
+**Per-tab navigation restoration** rides the same seam
+(`src/brownfield/nav-restore.ts`). Tab mounts pass `restoreNavState: true`
+(pushed screens deliberately do not), and the root layout's `NavStateGuard`
+checkpoints the active surface's current path (slice `nav:<route>`, 30-minute
+TTL) via `checkpointNavPath`. Two granularities feed restoration:
+
+- a per-tab slice `nav:<route>` holding that tab's last in-surface path,
+  resolved by `resolveTabPath`, and
+- a single **`nav:activeTab`** slice naming the currently selected tab, written
+  by `checkpointActiveTab` whenever the `selectTab` handler switches tabs.
+
+Because the single-root host changes the active RN tab **in place** (a
+`selectTab` bridge message, not a remount -- see
+[single-root-tabs-experiment.md](./single-root-tabs-experiment.md)),
+`applySelectTab` re-points checkpointing at the new tab with
+`setActiveNavSurface` rather than relying on a fresh mount. On the next mount
+`resolveInitialLocation` gives a fresh `nav:activeTab` slice naming a known tab
+precedence over the fragment's mount-time `initialUrl`, then resolves that
+tab's saved path -- this is how Android's in-place OTA reload (which re-mounts
+JS with the stale fragment `initialUrl`) still lands on the tab the user
+selected. Only the PATH is restored (expo-router rebuilds the stack from the
+URL); every read tolerates a missing/malformed/unknown-route slice by falling
+back to the tab root or `initialUrl`. `.maestro/verify-nav-restore-{ios,android}.yaml`
 pin the roundtrip.
 
 ## RN -> native navigation (the navigate seam)
@@ -736,12 +791,15 @@ not just physical devices. See [development-workflow.md](./development-workflow.
   keep versions pinned, and re-verify on any expo-router bump.
 - **iOS later-mount intermittent blank (known issue, not yet closed).** Before
   native tabs, opening `/developer` as the second pushed RN surface sometimes
-  produced a blank screen. The host now permits only one mounted RN surface at
-  a time, but tab switching still creates a later surface in the same shared
-  runtime. Re-run repeated Developer -> Sky -> Spinner -> Developer cycles
-  before treating the old symptom as resolved. Never retain concurrent Expo
-  Router roots in this host; keep the `freshRouteContext` warning above and
-  re-verify both issues on any expo-router bump.
+  produced a blank screen. The host permits only one mounted RN surface at a
+  time, and the single-root design means RN-tab -> RN-tab switches no longer
+  mount a new surface at all (a `selectTab` route swap in place). A later
+  surface is still created on the More -> RN-tab return and on pushed Test
+  screens, in the same shared runtime. Re-run repeated Developer -> Sky ->
+  Spinner -> Developer cycles and More <-> RN-tab round trips before treating
+  the old symptom as resolved. Never retain concurrent Expo Router roots in
+  this host; keep the `freshRouteContext` warning above and re-verify both
+  issues on any expo-router bump.
 
 ## Related docs
 

@@ -5,12 +5,20 @@ import UIKit
 ///
 /// It owns a bottom `UITabBar` (Developer / Sky / Spinner / More) and a single
 /// content slot that hosts at most ONE React Native surface at a time.
-/// Selecting an RN tab tears down and deallocates the previous surface and
-/// mounts a fresh one for the tab's route through `BrownfieldReloader`, so
-/// there are never two concurrent ExpoRoot surfaces. The More tab is NATIVE
-/// (`MoreMenuViewController`): it mounts no RN surface, and its Test rows push
-/// dedicated screens onto the navigation stack -- so a pushed RN Test screen
-/// is the only live RN surface while More is selected.
+///
+/// RN tabs keep ONE persistent surface: switching between Developer / Sky /
+/// Spinner does NOT tear down and remount. Instead the shell updates its native
+/// chrome and posts a `selectTab` bridge message
+/// (`{ "type": "selectTab", "route": <path> }`) to the live surface, whose JS
+/// listener calls `router.replace(route)` -- so there is no per-tab-switch flash
+/// (see docs/brownfield.md and docs/single-root-tabs-experiment.md). This
+/// replaces the older teardown-per-tab design.
+///
+/// The More tab is NATIVE (`MoreMenuViewController`): selecting it TEARS DOWN
+/// the RN surface (the one-ExpoRoot rule forbids leaving it mounted, even
+/// hidden, while More's Test rows push their own RN screens), so a pushed RN
+/// Test screen is the only live RN surface while More is selected. Returning
+/// from More to an RN tab deliberately mounts a FRESH surface for that tab.
 ///
 /// A deliberate `UITabBar` (not a `UITabBarController`) is used so the shell
 /// does not retain an RN root per tab -- only the active surface exists. The shell
@@ -19,12 +27,21 @@ import UIKit
 ///
 /// The selected tab is persisted (`HostTabPreference`) for scene restoration and
 /// so an OTA reload rebuilds the same surface. The shell is the
-/// `BrownfieldReloader` host: on reload it rebuilds the active surface in place,
-/// preserving the selected tab and any presented settings.
+/// `BrownfieldReloader` host: an OTA reload restarts the runtime, so on reload it
+/// rebuilds (real teardown + mount) the active surface in place, preserving the
+/// selected tab and any presented settings -- a rebuild is never a message post,
+/// because the old surface sits on the dead runtime.
 final class HostShellViewController: UIViewController, BrownfieldReloadHost {
     private let tabBar = UITabBar()
     private let contentContainer = UIView()
     private var currentSurface: UIViewController?
+    /// Whether the content slot currently holds a LIVE RN surface (as opposed
+    /// to the native More menu, or nothing). Drives the mount-vs-post decision
+    /// in `selectTab`: a soft route swap is only valid when a persistent RN
+    /// surface is actually mounted to receive the `selectTab` bridge message.
+    /// Keyed off surface identity, not the previous tab, so returning from More
+    /// (native, no RN surface) to an RN tab correctly mounts fresh.
+    private var hasMountedReactSurface = false
     private var selectedTab: HostTab = HostTabPreference.current
 
     private lazy var settingsButton = UIBarButtonItem(
@@ -49,9 +66,11 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
     /// Rebuild the active RN surface after the runtime restarted (OTA reload or
     /// manual reload). The reloader has already restarted the runtime; here we
     /// only recreate the surface for the current tab, leaving the selected tab
-    /// and any presented settings untouched. Any PUSHED screen (the More tab's
-    /// Tests) is popped first: a pushed RN screen predating the restart sits on
-    /// the torn-down runtime and cannot be rebuilt in place on the stack.
+    /// and any presented settings untouched. This is a REAL teardown + mount
+    /// (never a `selectTab` post): the runtime restarted, so the old surface is
+    /// dead and a bridge message would be lost. Any PUSHED screen (the More
+    /// tab's Tests) is popped first: a pushed RN screen predating the restart
+    /// sits on the torn-down runtime and cannot be rebuilt in place on the stack.
     func rebuildActiveSurface() {
         navigationController?.popToRootViewController(animated: false)
         mountSurface(for: selectedTab)
@@ -99,7 +118,39 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
         }
         tabBar.selectedItem = tabBar.items?.first { $0.tag == tab.rawValue }
         updateNavigationItem()
+
+        // Soft switch (RN tab -> RN tab): a persistent RN surface is already
+        // mounted and the runtime is up, so keep the surface and drive the
+        // route change over the bridge instead of tearing it down -- no flash.
+        // The JS listener handles the posted message with router.replace.
+        if let route = tab.route,
+           hasMountedReactSurface,
+           !BrownfieldReloader.shared.isRestartInFlight {
+            postSelectTab(route: route)
+            return
+        }
+
+        // Hard mount otherwise. This covers: target is the native More tab; no
+        // live RN surface is mounted (first mount, or returning from More); or a
+        // restart is in flight. In the restart case `mountSurface` skips the
+        // mount AND we skip the post above -- the runtime is down, so the
+        // message would be lost -- and the selection we just persisted is
+        // materialized by `rebuildActiveSurface` once the restart completes.
         mountSurface(for: tab)
+    }
+
+    /// Post the `selectTab` bridge message so the persistent RN surface swaps
+    /// its route in place. Serialized with `JSONSerialization` (never string
+    /// interpolation) so a route can't break the JSON payload.
+    private func postSelectTab(route: String) {
+        let payload: [String: Any] = [
+            "type": Brownfield.selectTabMessageType,
+            "route": route,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        ReactNativeBrownfield.shared.postMessage(json)
     }
 
     private func updateNavigationItem() {
@@ -107,11 +158,15 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
         navigationItem.rightBarButtonItem = selectedTab == .developer ? settingsButton : nil
     }
 
-    /// Mount a tab's content in the single content slot, tearing down the
-    /// previous surface first. RN tabs mount one RN surface (so only one
-    /// ExpoRoot surface is ever live); the native More tab mounts the Test
-    /// menu and leaves NO RN surface mounted -- its rows push dedicated
-    /// screens on the navigation stack instead.
+    /// Hard-mount a tab's content in the single content slot, tearing down the
+    /// previous surface first. This is the teardown+mount path used for the
+    /// FIRST mount, for returning from the native More tab to an RN tab, and by
+    /// `rebuildActiveSurface` after a runtime restart -- NOT for RN tab -> RN
+    /// tab switches, which `selectTab` handles as a soft route swap over the
+    /// bridge. RN tabs mount one RN surface (so only one ExpoRoot surface is
+    /// ever live); the native More tab mounts the Test menu and leaves NO RN
+    /// surface mounted -- its rows push dedicated screens on the navigation
+    /// stack instead.
     private func mountSurface(for tab: HostTab) {
         guard let route = tab.route else {
             removeCurrentSurface()
@@ -141,6 +196,7 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
             title: tab.title
         )
         embedSurface(controller)
+        hasMountedReactSurface = true
     }
 
     private func embedSurface(_ controller: UIViewController) {
@@ -163,6 +219,9 @@ final class HostShellViewController: UIViewController, BrownfieldReloadHost {
         current.view.removeFromSuperview()
         current.removeFromParent()
         currentSurface = nil
+        // The slot no longer holds a live RN surface. The RN mount path sets
+        // this back to true after re-embedding; the More path leaves it false.
+        hasMountedReactSurface = false
     }
 
     // MARK: - Settings
