@@ -18,7 +18,8 @@ import com.callstack.reactnativebrownfield.ReactNativeFragment
  * inside a SHARED activity leaks callbacks across visits (second-visit dead
  * Back). This repo patches the package
  * (patches/@callstack__react-native-brownfield@3.6.1.patch) to scope the
- * callback to the fragment's lifecycle. Per-activity hosting is kept as the
+ * callback to the fragment's VIEW (owner registration plus removal in
+ * onDestroyView). Per-activity hosting is kept as the
  * product pattern -- fresh dispatcher and chrome per pushed screen -- and the
  * double-visit case stays pinned by .maestro/verify-more-tab-android.yaml as
  * a regression guard on the patch. See docs/brownfield.md.

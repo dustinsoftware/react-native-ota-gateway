@@ -260,9 +260,13 @@ Three patch mechanisms, each with a distinct survival property:
   `pnpm-workspace.yaml`), applied to the package in `node_modules` at install
   time -- durable across every prebuild, including the CLI's internal one.
   Currently one: `@callstack__react-native-brownfield@3.6.1.patch` scopes the
-  brownfield back-press callback to the hosting fragment's lifecycle
-  (upstream registers it Activity-scoped with no owner, leaking callbacks
-  when fragments are swapped inside one Activity). The library's Kotlin is
+  brownfield back-press callback to the hosting fragment's VIEW: it is
+  registered with the fragment as lifecycle owner and explicitly removed in
+  `onDestroyView` (a detach/attach cycle re-runs `onCreateView` while the
+  fragment stays alive, so owner scoping alone would still accumulate one
+  callback per view creation). Upstream registers it Activity-scoped with no
+  owner, leaking callbacks whenever fragments are swapped inside one
+  Activity. The library's Kotlin is
   compiled from `node_modules` into the published AAR, so the fix ships in
   every `brownfield publish:android`.
 
@@ -553,8 +557,9 @@ Activity would leave callbacks from removed surfaces registered. This repo
 fixes that with a pnpm package patch
 (`patches/@callstack__react-native-brownfield@3.6.1.patch`, see
 [Patches and prebuild ordering](#patches-and-prebuild-ordering)): the callback
-is registered with the fragment as its lifecycle owner, so the dispatcher
-removes it when the fragment is destroyed. The shell nonetheless keeps the
+is registered with the fragment as its lifecycle owner AND removed in the
+fragment's `onDestroyView`, so every view creation's callback is gone by the
+time the next one registers. The shell nonetheless keeps the
 recreate-per-tab model: a tab selection persists the route, removes the current
 fragment, and recreates the Activity, so the old RN root and any
 Activity-scoped state die before the new route mounts. `HostRoutePrefs`
@@ -591,8 +596,11 @@ callbacks across visits -- the second visit's Back goes dead (the product
 repos shipped a package patch for exactly this before rehosting
 per-activity). This repo carries the same class of fix as a pnpm package
 patch (`patches/@callstack__react-native-brownfield@3.6.1.patch`): the
-fragment passes itself as the callback's lifecycle owner, so the dispatcher
-removes the callback when the fragment is destroyed. Per-activity hosting is
+fragment passes itself as the callback's lifecycle owner and removes the
+callback in `onDestroyView`, so the registration never outlives the view it
+was created for (owner scoping alone would still accumulate across
+detach/attach cycles, which re-run `onCreateView` on a live fragment).
+Per-activity hosting is
 kept as the product pattern (fresh dispatcher and chrome per pushed screen),
 and the double-visit case stays pinned by
 `.maestro/verify-more-tab-android.yaml` as a regression guard on the patch.

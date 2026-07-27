@@ -34,8 +34,9 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
  * lifecycle owner**, so it would never be removed when a fragment is detached
  * and callbacks would accumulate if fragments were swapped in place. This repo
  * patches the package (patches/@callstack__react-native-brownfield@3.6.1.patch,
- * see docs/brownfield.md) so the callback is scoped to the fragment's
- * lifecycle and dies with it. The recreate-per-tab model below is retained
+ * see docs/brownfield.md) so the callback is scoped to the fragment's VIEW
+ * (owner registration plus removal in onDestroyView) and dies with it. The
+ * recreate-per-tab model below is retained
  * regardless: a tab change persists the selected route and **relaunches this
  * Activity** ([recreate]), so the old RN root and any Activity-scoped state
  * are torn down before the newly selected route mounts in a fresh Activity.

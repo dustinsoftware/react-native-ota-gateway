@@ -1,8 +1,8 @@
 diff --git a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt
-index 22f3387afab585756017ee5aee7b039939fcdc27..635c737b443c150dabd34c3ba84f7ddace068528 100644
+index 22f3387afab585756017ee5aee7b039939fcdc27..daad40e44923f0e3cbc8a0c9ef1eef2341e8ff17 100644
 --- a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt
 +++ b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeBrownfield.kt
-@@ -157,11 +157,13 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
+@@ -157,12 +157,36 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
          }
      }
  
@@ -12,11 +12,35 @@ index 22f3387afab585756017ee5aee7b039939fcdc27..635c737b443c150dabd34c3ba84f7dda
          moduleName: String,
          reactDelegate: ReactDelegateWrapper? = null,
          launchOptions: Bundle? = null,
+-    ): FrameLayout {
 +        lifecycleOwner: LifecycleOwner? = null,
-     ): FrameLayout {
++    ): FrameLayout =
++        createViewWithBackCallback(
++            activity,
++            moduleName,
++            reactDelegate,
++            launchOptions,
++            lifecycleOwner,
++        ).first
++
++    /**
++     * Same as [createView], but also returns the OnBackPressedCallback that was
++     * registered (or null if none was), so a fragment host can remove it when
++     * its VIEW is destroyed: onCreateView re-runs on a detach/attach cycle
++     * while the fragment (the lifecycle owner) stays alive, and lifecycle-owner
++     * registration alone only removes the callback on the owner's destruction.
++     */
++    internal fun createViewWithBackCallback(
++        activity: FragmentActivity?,
++        moduleName: String,
++        reactDelegate: ReactDelegateWrapper? = null,
++        launchOptions: Bundle? = null,
++        lifecycleOwner: LifecycleOwner? = null,
++    ): Pair<FrameLayout, OnBackPressedCallback?> {
          val reactHost = shared.reactHost
          val resolvedDelegate =
-@@ -174,8 +176,16 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
+             reactDelegate ?: ReactDelegateWrapper(activity, reactHost, moduleName, launchOptions)
+@@ -174,8 +198,20 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
              }
          }
  
@@ -29,18 +53,51 @@ index 22f3387afab585756017ee5aee7b039939fcdc27..635c737b443c150dabd34c3ba84f7dda
 +        // within one Activity). Fragment-hosted views pass the fragment;
 +        // standalone views fall back to the Activity itself.
 +        val callbackOwner = lifecycleOwner ?: activity
-+        if (activity != null && callbackOwner != null) {
-+            activity.onBackPressedDispatcher.addCallback(callbackOwner, backPressedCallback)
-+        }
++        val registeredCallback =
++            if (activity != null && callbackOwner != null) {
++                activity.onBackPressedDispatcher.addCallback(callbackOwner, backPressedCallback)
++                backPressedCallback
++            } else {
++                null
++            }
          // invoked on the last RN screen exit
          resolvedDelegate.setHardwareBackHandler {
              backPressedCallback.isEnabled = false
+@@ -194,7 +230,7 @@ class ReactNativeBrownfield private constructor(val reactHost: ReactHost) {
+         }
+ 
+         resolvedDelegate.loadApp()
+-        return resolvedDelegate.reactRootView!!
++        return Pair(resolvedDelegate.reactRootView!!, registeredCallback)
+     }
+ 
+     private fun getLifeCycleObserver(reactDelegate: ReactDelegateWrapper): DefaultLifecycleObserver {
 diff --git a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt
-index 5efe9fd9ceaac280cb742b294d9c48bfaa9f3b62..6825bd433b544e660d1ca18d6c4bcd260c7ff811 100644
+index 5efe9fd9ceaac280cb742b294d9c48bfaa9f3b62..e404b6104d96b80158fbaf4f6a89bde0ce6125eb 100644
 --- a/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt
 +++ b/android/src/main/java/com/callstack/reactnativebrownfield/ReactNativeFragment.kt
-@@ -54,7 +54,11 @@ class ReactNativeFragment : ReactFragment(), PermissionAwareActivity {
-         return ReactNativeBrownfield.shared.createView(
+@@ -5,6 +5,7 @@ import android.util.Log
+ import android.view.LayoutInflater
+ import android.view.View
+ import android.view.ViewGroup
++import androidx.activity.OnBackPressedCallback
+ import com.callstack.reactnativebrownfield.constants.ReactNativeFragmentArgNames
+ import com.facebook.react.ReactFragment
+ import com.facebook.react.ReactHost
+@@ -17,6 +18,7 @@ class ReactNativeFragment : ReactFragment(), PermissionAwareActivity {
+     private lateinit var permissionsCallback: Callback
+     private var permissionListener: PermissionListener? = null
+     private lateinit var moduleName: String
++    private var backPressedCallback: OnBackPressedCallback? = null
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         /**
+@@ -51,11 +53,27 @@ class ReactNativeFragment : ReactFragment(), PermissionAwareActivity {
+         container: ViewGroup?,
+         savedInstanceState: Bundle?
+     ): View {
+-        return ReactNativeBrownfield.shared.createView(
++        val (view, backCallback) = ReactNativeBrownfield.shared.createViewWithBackCallback(
              activity,
              moduleName,
 -            this.reactDelegate as ReactDelegateWrapper
@@ -50,5 +107,18 @@ index 5efe9fd9ceaac280cb742b294d9c48bfaa9f3b62..6825bd433b544e660d1ca18d6c4bcd26
 +            // destroyed, instead of leaking across fragment swaps.
 +            lifecycleOwner = this,
          )
++        backPressedCallback = backCallback
++        return view
++    }
++
++    override fun onDestroyView() {
++        // onCreateView re-runs on a detach/attach cycle while this fragment
++        // (the callback's lifecycle owner) stays alive, so remove the per-view
++        // registration here or callbacks would accumulate on the dispatcher
++        // until the fragment is destroyed.
++        backPressedCallback?.remove()
++        backPressedCallback = null
++        super.onDestroyView()
      }
  
+     override val reactHost: ReactHost?

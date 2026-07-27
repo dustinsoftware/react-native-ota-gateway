@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@callstack/react-native-brownfield@3.6.1':
-    hash: fcd0ed0e4407f6c4120887be520ddc4f9e1f81b2cd5b5d03d2635c71dc0fd501
+    hash: b5829283973ab2ae040d88d1f9d76ac24c94b96112b8dffbd9901f02a2859170
     path: patches/@callstack__react-native-brownfield@3.6.1.patch
 
 importers:
@@ -17,7 +17,7 @@ importers:
     dependencies:
       '@callstack/react-native-brownfield':
         specifier: 3.6.1
-        version: 3.6.1(patch_hash=fcd0ed0e4407f6c4120887be520ddc4f9e1f81b2cd5b5d03d2635c71dc0fd501)(@expo/config-plugins@55.0.11)(@react-native-community/cli-config-android@20.2.0)(@react-native-community/cli-config@20.2.0(typescript@5.9.3))(typescript@5.9.3)
+        version: 3.6.1(patch_hash=b5829283973ab2ae040d88d1f9d76ac24c94b96112b8dffbd9901f02a2859170)(@expo/config-plugins@55.0.11)(@react-native-community/cli-config-android@20.2.0)(@react-native-community/cli-config@20.2.0(typescript@5.9.3))(typescript@5.9.3)
       '@expo/metro-runtime':
         specifier: 55.0.10
         version: 55.0.10(@expo/dom-webview@55.0.6)(expo@55.0.19)(react-dom@19.2.0(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.0))(react@19.2.0)
@@ -5192,7 +5192,7 @@ snapshots:
       - supports-color
       - typescript
 
-  '@callstack/react-native-brownfield@3.6.1(patch_hash=fcd0ed0e4407f6c4120887be520ddc4f9e1f81b2cd5b5d03d2635c71dc0fd501)(@expo/config-plugins@55.0.11)(@react-native-community/cli-config-android@20.2.0)(@react-native-community/cli-config@20.2.0(typescript@5.9.3))(typescript@5.9.3)':
+  '@callstack/react-native-brownfield@3.6.1(patch_hash=b5829283973ab2ae040d88d1f9d76ac24c94b96112b8dffbd9901f02a2859170)(@expo/config-plugins@55.0.11)(@react-native-community/cli-config-android@20.2.0)(@react-native-community/cli-config@20.2.0(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@callstack/brownfield-cli': 3.6.1(@react-native-community/cli-config-android@20.2.0)(@react-native-community/cli-config@20.2.0(typescript@5.9.3))(typescript@5.9.3)
       '@expo/config-plugins': 55.0.11

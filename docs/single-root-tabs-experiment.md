@@ -52,7 +52,8 @@ The failure modes that forced the current teardown/remount design (see
   fragments were *replaced* inside a shared activity. This is now fixed by a
   pnpm package patch
   (`patches/@callstack__react-native-brownfield@3.6.1.patch`) that scopes the
-  callback to the fragment's lifecycle -- so neither the always-mounted
+  callback to the fragment's VIEW (owner registration plus removal in
+  `onDestroyView`) -- so neither the always-mounted
   persistent root nor a More-tab detach/remount cycle (Open Problem 1,
   option A) can accumulate callbacks. Android would also stop recreating
   `RNHostActivity` per tab switch.
